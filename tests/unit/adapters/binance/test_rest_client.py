@@ -1,0 +1,342 @@
+"""
+Binance REST 클라이언트 테스트
+
+BinanceRestClient HTTP 요청 테스트 (httpx mock 사용).
+"""
+
+from decimal import Decimal
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+import httpx
+
+from adapters.binance.rest_client import BinanceRestClient
+from adapters.binance.rate_limiter import RateLimitError, BinanceApiError, OrderError
+from adapters.models import OrderRequest
+
+
+class TestBinanceRestClientSignature:
+    """서명 생성 테스트"""
+    
+    def test_generate_signature(self) -> None:
+        """HMAC-SHA256 서명 생성"""
+        client = BinanceRestClient(
+            base_url="https://fapi.binance.com",
+            api_key="test_api_key",
+            api_secret="test_secret_key",
+        )
+        
+        query_string = "symbol=XRPUSDT&timestamp=1234567890"
+        signature = client._generate_signature(query_string)
+        
+        # 서명은 64자 hex 문자열
+        assert len(signature) == 64
+        assert all(c in "0123456789abcdef" for c in signature)
+    
+    def test_signature_consistency(self) -> None:
+        """동일 입력에 대해 동일 서명"""
+        client = BinanceRestClient(
+            base_url="https://fapi.binance.com",
+            api_key="test_api_key",
+            api_secret="test_secret_key",
+        )
+        
+        query_string = "test=value"
+        sig1 = client._generate_signature(query_string)
+        sig2 = client._generate_signature(query_string)
+        
+        assert sig1 == sig2
+    
+    def test_different_input_different_signature(self) -> None:
+        """다른 입력에 대해 다른 서명"""
+        client = BinanceRestClient(
+            base_url="https://fapi.binance.com",
+            api_key="test_api_key",
+            api_secret="test_secret_key",
+        )
+        
+        sig1 = client._generate_signature("input1")
+        sig2 = client._generate_signature("input2")
+        
+        assert sig1 != sig2
+
+
+class TestBinanceRestClientListenKey:
+    """listenKey 관리 테스트"""
+    
+    @pytest.mark.asyncio
+    async def test_create_listen_key_success(self) -> None:
+        """listenKey 생성 성공"""
+        client = BinanceRestClient(
+            base_url="https://fapi.binance.com",
+            api_key="test_key",
+            api_secret="test_secret",
+        )
+        
+        # HTTP 응답 모킹
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"listenKey": "test_listen_key_12345"}
+        mock_response.headers = {}
+        
+        with patch.object(client, "_get_client") as mock_get_client:
+            mock_http_client = AsyncMock()
+            mock_http_client.request.return_value = mock_response
+            mock_get_client.return_value = mock_http_client
+            
+            listen_key = await client.create_listen_key()
+            
+            assert listen_key == "test_listen_key_12345"
+            assert client._listen_key == "test_listen_key_12345"
+    
+    @pytest.mark.asyncio
+    async def test_extend_listen_key_success(self) -> None:
+        """listenKey 갱신 성공"""
+        client = BinanceRestClient(
+            base_url="https://fapi.binance.com",
+            api_key="test_key",
+            api_secret="test_secret",
+        )
+        
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {}
+        mock_response.headers = {}
+        
+        with patch.object(client, "_get_client") as mock_get_client:
+            mock_http_client = AsyncMock()
+            mock_http_client.request.return_value = mock_response
+            mock_get_client.return_value = mock_http_client
+            
+            # 에러 없이 완료
+            await client.extend_listen_key()
+
+
+class TestBinanceRestClientBalances:
+    """잔고 조회 테스트"""
+    
+    @pytest.mark.asyncio
+    async def test_get_balances_returns_decimal(
+        self,
+        binance_balance_response: dict,
+    ) -> None:
+        """잔고 조회 - Decimal 반환 확인"""
+        client = BinanceRestClient(
+            base_url="https://fapi.binance.com",
+            api_key="test_key",
+            api_secret="test_secret",
+        )
+        
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = [binance_balance_response]
+        mock_response.headers = {}
+        
+        with patch.object(client, "_get_client") as mock_get_client:
+            mock_http_client = AsyncMock()
+            mock_http_client.request.return_value = mock_response
+            mock_get_client.return_value = mock_http_client
+            
+            balances = await client.get_balances()
+            
+            assert len(balances) == 1
+            assert isinstance(balances[0].wallet_balance, Decimal)
+            assert balances[0].asset == "USDT"
+    
+    @pytest.mark.asyncio
+    async def test_get_balances_filters_zero(self) -> None:
+        """잔고 조회 - 0 잔고 필터링"""
+        client = BinanceRestClient(
+            base_url="https://fapi.binance.com",
+            api_key="test_key",
+            api_secret="test_secret",
+        )
+        
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = [
+            {"asset": "USDT", "balance": "100", "availableBalance": "100"},
+            {"asset": "BTC", "balance": "0", "availableBalance": "0"},
+        ]
+        mock_response.headers = {}
+        
+        with patch.object(client, "_get_client") as mock_get_client:
+            mock_http_client = AsyncMock()
+            mock_http_client.request.return_value = mock_response
+            mock_get_client.return_value = mock_http_client
+            
+            balances = await client.get_balances()
+            
+            # 0 잔고인 BTC는 제외
+            assert len(balances) == 1
+            assert balances[0].asset == "USDT"
+
+
+class TestBinanceRestClientOrders:
+    """주문 관련 테스트"""
+    
+    @pytest.mark.asyncio
+    async def test_place_order_with_client_order_id(
+        self,
+        binance_order_response: dict,
+    ) -> None:
+        """주문 생성 - client_order_id 전달"""
+        client = BinanceRestClient(
+            base_url="https://fapi.binance.com",
+            api_key="test_key",
+            api_secret="test_secret",
+        )
+        
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = binance_order_response
+        mock_response.headers = {}
+        
+        with patch.object(client, "_get_client") as mock_get_client:
+            mock_http_client = AsyncMock()
+            mock_http_client.request.return_value = mock_response
+            mock_get_client.return_value = mock_http_client
+            
+            request = OrderRequest.market(
+                symbol="XRPUSDT",
+                side="BUY",
+                quantity=Decimal("100"),
+                client_order_id="ae-test-order-001",
+            )
+            
+            order = await client.place_order(request)
+            
+            assert order.client_order_id == "ae-test-order-001"
+    
+    @pytest.mark.asyncio
+    async def test_place_order_api_error(self) -> None:
+        """주문 생성 - API 에러"""
+        client = BinanceRestClient(
+            base_url="https://fapi.binance.com",
+            api_key="test_key",
+            api_secret="test_secret",
+        )
+        
+        mock_response = MagicMock()
+        mock_response.status_code = 400
+        mock_response.json.return_value = {
+            "code": -2010,
+            "msg": "Order would immediately match",
+        }
+        mock_response.headers = {}
+        mock_response.text = '{"code": -2010, "msg": "Order would immediately match"}'
+        
+        with patch.object(client, "_get_client") as mock_get_client:
+            mock_http_client = AsyncMock()
+            mock_http_client.request.return_value = mock_response
+            mock_get_client.return_value = mock_http_client
+            
+            request = OrderRequest.market(
+                symbol="XRPUSDT",
+                side="BUY",
+                quantity=Decimal("100"),
+            )
+            
+            with pytest.raises(OrderError) as exc_info:
+                await client.place_order(request)
+            
+            assert exc_info.value.code == -2010
+
+
+class TestBinanceRestClientRateLimit:
+    """Rate Limit 테스트"""
+    
+    @pytest.mark.asyncio
+    async def test_rate_limit_429_retry(self) -> None:
+        """429 에러 시 재시도"""
+        client = BinanceRestClient(
+            base_url="https://fapi.binance.com",
+            api_key="test_key",
+            api_secret="test_secret",
+            max_retries=2,
+        )
+        
+        # 첫 번째 응답: 429
+        mock_response_429 = MagicMock()
+        mock_response_429.status_code = 429
+        mock_response_429.headers = {"Retry-After": "1"}
+        
+        # 두 번째 응답: 성공
+        mock_response_ok = MagicMock()
+        mock_response_ok.status_code = 200
+        mock_response_ok.json.return_value = {"serverTime": 1234567890}
+        mock_response_ok.headers = {}
+        
+        with patch.object(client, "_get_client") as mock_get_client:
+            mock_http_client = AsyncMock()
+            mock_http_client.request.side_effect = [
+                mock_response_429,
+                mock_response_ok,
+            ]
+            mock_get_client.return_value = mock_http_client
+            
+            # 재시도 후 성공
+            result = await client.get_server_time()
+            
+            assert result == 1234567890
+            assert mock_http_client.request.call_count == 2
+    
+    @pytest.mark.asyncio
+    async def test_rate_limit_updates_tracker(self) -> None:
+        """응답 헤더에서 Rate Limit 정보 추적"""
+        client = BinanceRestClient(
+            base_url="https://fapi.binance.com",
+            api_key="test_key",
+            api_secret="test_secret",
+        )
+        
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"serverTime": 1234567890}
+        mock_response.headers = {
+            "X-MBX-USED-WEIGHT-1m": "500",
+            "X-MBX-ORDER-COUNT-1m": "10",
+        }
+        
+        with patch.object(client, "_get_client") as mock_get_client:
+            mock_http_client = AsyncMock()
+            mock_http_client.request.return_value = mock_response
+            mock_get_client.return_value = mock_http_client
+            
+            await client.get_server_time()
+            
+            # Rate tracker 업데이트 확인
+            assert client.rate_tracker.used_weight_1m == 500
+            assert client.rate_tracker.order_count_1m == 10
+    
+    @pytest.mark.asyncio
+    async def test_rate_limit_threshold_blocks_request(self) -> None:
+        """임계값 초과 시 요청 차단"""
+        client = BinanceRestClient(
+            base_url="https://fapi.binance.com",
+            api_key="test_key",
+            api_secret="test_secret",
+        )
+        
+        # 임계값 초과 설정
+        client.rate_tracker.used_weight_1m = 3000  # WEIGHT_STOP 이상
+        
+        with pytest.raises(RateLimitError):
+            await client.get_server_time()
+
+
+class TestBinanceRestClientContextManager:
+    """컨텍스트 매니저 테스트"""
+    
+    @pytest.mark.asyncio
+    async def test_context_manager_closes_client(self) -> None:
+        """컨텍스트 매니저 종료 시 클라이언트 닫힘"""
+        async with BinanceRestClient(
+            base_url="https://fapi.binance.com",
+            api_key="test_key",
+            api_secret="test_secret",
+        ) as client:
+            assert client is not None
+        
+        # 종료 후 클라이언트 None 확인
+        assert client._client is None

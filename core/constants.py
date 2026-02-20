@@ -12,15 +12,18 @@ PROJECT_ROOT: Path = Path(__file__).resolve().parent.parent
 
 
 class BinanceEndpoints:
-    """Binance API 엔드포인트 (고정값)"""
+    """Binance API 엔드포인트 (고정값)
+    
+    공식 문서: https://developers.binance.com/docs/derivatives/usds-margined-futures/general-info
+    """
 
-    # Production
+    # Production (USDT-M Futures)
     PROD_REST_URL: str = "https://fapi.binance.com"
     PROD_WS_URL: str = "wss://fstream.binance.com"
 
-    # Testnet
-    TEST_REST_URL: str = "https://testnet.binancefuture.com"
-    TEST_WS_URL: str = "wss://stream.binancefuture.com"
+    # Testnet (USDT-M Futures)
+    TEST_REST_URL: str = "https://demo-fapi.binance.com"
+    TEST_WS_URL: str = "wss://fstream.binancefuture.com"
 
 
 class Defaults:
