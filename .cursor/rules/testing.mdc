@@ -1,0 +1,241 @@
+---
+description: 테스트 작성 가이드
+globs: "**/tests/**/*.py"
+alwaysApply: false
+---
+
+# 테스트 가이드
+
+## 테스트 구조
+
+```
+tests/
+├── unit/           # 단위 테스트 (외부 의존성 없음)
+│   ├── core/
+│   └── adapters/
+├── integration/    # 통합 테스트 (Mock 사용)
+└── e2e/            # E2E 테스트 (Testnet 실제 호출)
+```
+
+## pytest 사용
+
+```python
+import pytest
+
+# 기본 테스트
+def test_calculate_pnl():
+    result = calculate_pnl(trades)
+    assert result == expected
+
+# 비동기 테스트
+@pytest.mark.asyncio
+async def test_fetch_balance():
+    result = await client.get_balance()
+    assert result.asset == "USDT"
+
+# 예외 테스트
+def test_invalid_order_raises():
+    with pytest.raises(ValueError, match="quantity must be positive"):
+        validate_order(OrderRequest(quantity=-1))
+```
+
+## Fixture 사용
+
+```python
+@pytest.fixture
+def mock_exchange_client():
+    """Mock 거래소 클라이언트"""
+    return MockExchangeClient()
+
+@pytest.fixture
+async def db_session():
+    """테스트용 인메모리 DB"""
+    async with aiosqlite.connect(":memory:") as db:
+        await init_schema(db)
+        yield db
+```
+
+## Mock 패턴
+
+Protocol 기반 Mock 사용:
+
+```python
+# adapters/mock/exchange_client.py
+class MockExchangeClient(IExchangeRestClient):
+    def __init__(self):
+        self.orders: list[Order] = []
+        self.balances: list[Balance] = [
+            Balance(asset="USDT", free=Decimal("10000"))
+        ]
+    
+    async def place_order(self, request: OrderRequest) -> OrderResult:
+        order = Order(
+            order_id=str(uuid4()),
+            symbol=request.symbol,
+            status="FILLED",
+        )
+        self.orders.append(order)
+        return OrderResult(success=True, order=order)
+```
+
+## 테스트 명명
+
+```python
+# ✅ GOOD - 명확한 의도
+def test_place_order_returns_filled_when_market_order():
+    ...
+
+def test_place_order_raises_when_insufficient_balance():
+    ...
+
+# ❌ BAD - 모호함
+def test_order():
+    ...
+```
+
+## Phase별 테스트 기준
+
+### Dev-Phase 0 (핵심 유틸리티)
+- 외부 호출 없음
+- pytest 100% 통과
+
+```python
+# core/utils/test_dedup.py
+def test_generate_trade_dedup_key():
+    key = generate_dedup_key("trade", exchange_trade_id="123")
+    assert key == "BINANCE:FUTURES:XRPUSDT:trade:123"
+```
+
+### Dev-Phase 1 (어댑터)
+- Mock으로 교체 가능 확인
+- Protocol 준수 테스트
+
+```python
+def test_mock_client_implements_protocol():
+    client = MockExchangeClient()
+    assert isinstance(client, IExchangeRestClient)
+```
+
+### Dev-Phase 2 (E2E 시나리오)
+- Testnet 실제 호출
+- 시나리오별 검증
+
+```python
+@pytest.mark.e2e
+@pytest.mark.asyncio
+async def test_market_buy_scenario():
+    """시장가 매수 시나리오: 주문 → 체결 → 포지션 확인"""
+    client = BinanceClient(config)
+    
+    # 주문
+    result = await client.place_order(
+        OrderRequest(symbol="XRPUSDT", side="BUY", quantity=10)
+    )
+    assert result.status == "FILLED"
+    
+    # 포지션 확인
+    position = await client.get_position("XRPUSDT")
+    assert position.quantity == 10
+```
+
+## 테스트 실행
+
+```bash
+# 단위 테스트만
+pytest tests/unit -v
+
+# 통합 테스트
+pytest tests/integration -v
+
+# E2E (Testnet)
+pytest tests/e2e -v -m e2e
+
+# 커버리지
+pytest --cov=core --cov=adapters --cov-report=html
+```
+
+## 크로스 플랫폼 테스트 (Windows 개발 → Linux 운영)
+
+**원칙**: 모든 테스트는 Windows와 Linux 양쪽에서 통과해야 함.
+
+### 경로 관련 테스트
+
+```python
+from pathlib import Path
+
+def test_paths_are_pathlib_objects():
+    """경로 상수가 pathlib.Path 타입인지 확인"""
+    from core.constants import Paths
+    
+    assert isinstance(Paths.CONFIG_DIR, Path)
+    assert isinstance(Paths.DATA_DIR, Path)
+    assert isinstance(Paths.PROD_DB, Path)
+
+def test_paths_are_absolute():
+    """경로가 절대 경로로 해석 가능한지 확인"""
+    from core.constants import Paths
+    
+    # resolve()로 절대 경로 변환 가능해야 함
+    assert Paths.PROJECT_ROOT.is_absolute() or Paths.PROJECT_ROOT.resolve().is_absolute()
+```
+
+### 테스트 Fixture - 임시 경로
+
+```python
+import tempfile
+from pathlib import Path
+
+@pytest.fixture
+def temp_dir():
+    """OS 독립적인 임시 디렉토리"""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        yield Path(tmpdir)
+
+@pytest.fixture
+def temp_db(temp_dir):
+    """테스트용 임시 DB 경로"""
+    db_path = temp_dir / "test.db"
+    yield db_path
+    # cleanup은 temp_dir가 처리
+```
+
+### 금지 패턴 (테스트에서도 동일)
+
+```python
+# ❌ BAD - 하드코딩된 경로 구분자
+def test_something():
+    path = "data/test.db"  # Linux만 동작
+    
+# ✅ GOOD - pathlib 사용
+def test_something(temp_dir):
+    path = temp_dir / "test.db"
+
+# ❌ BAD - 절대 경로 하드코딩
+def test_something():
+    path = "/tmp/test.db"  # Windows에서 실패
+    
+# ✅ GOOD - tempfile 사용
+def test_something(temp_dir):
+    path = temp_dir / "test.db"
+```
+
+### CI/CD 매트릭스 테스트
+
+```yaml
+# .github/workflows/test.yml 예시
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ['3.11', '3.12']
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Run tests
+        run: pytest tests/unit tests/integration -v
+```

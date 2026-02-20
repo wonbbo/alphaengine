@@ -1,0 +1,323 @@
+---
+description: Python 범용 코딩 표준 (FastAPI 규칙은 fastapi.mdc 참조)
+globs: "**/*.py"
+alwaysApply: false
+---
+
+# Python 코딩 표준
+
+## 스타일 가이드
+
+- PEP 8 스타일 준수
+- 들여쓰기: 4 스페이스
+- 최대 줄 길이: 100자
+- 주석은 한글로 작성
+
+## 타입 힌트
+
+모든 함수에 타입 힌트 필수:
+
+```python
+# ✅ GOOD
+async def get_balance(symbol: str) -> Balance:
+    ...
+
+# ❌ BAD
+async def get_balance(symbol):
+    ...
+```
+
+## 함수 정의
+
+- `def`: 순수 함수, CPU-bound 작업
+- `async def`: I/O-bound 작업, 네트워크 호출
+
+```python
+# I/O 작업은 async
+async def fetch_trades(symbol: str) -> list[Trade]:
+    ...
+
+# 순수 계산은 sync
+def calculate_pnl(trades: list[Trade]) -> Decimal:
+    ...
+```
+
+## 에러 핸들링
+
+Guard clause 패턴 사용 (early return):
+
+```python
+# ✅ GOOD - Guard clause
+async def place_order(request: OrderRequest) -> OrderResult:
+    # 에러 조건 먼저 처리
+    if not request.symbol:
+        raise ValueError("symbol is required")
+    
+    if request.quantity <= 0:
+        raise ValueError("quantity must be positive")
+    
+    # Happy path는 마지막에
+    return await self._execute_order(request)
+
+# ❌ BAD - 중첩된 if
+async def place_order(request: OrderRequest) -> OrderResult:
+    if request.symbol:
+        if request.quantity > 0:
+            return await self._execute_order(request)
+        else:
+            raise ValueError("quantity must be positive")
+    else:
+        raise ValueError("symbol is required")
+```
+
+## 변수명
+
+명확하고 서술적인 이름 사용:
+
+```python
+# ✅ GOOD
+is_connected = True
+has_open_position = False
+order_count = 10
+
+# ❌ BAD
+conn = True
+pos = False
+cnt = 10
+```
+
+## Pydantic 모델
+
+입력 검증에 Pydantic 사용:
+
+```python
+from pydantic import BaseModel, Field
+
+class OrderRequest(BaseModel):
+    symbol: str = Field(..., min_length=1)
+    side: Literal["BUY", "SELL"]
+    quantity: Decimal = Field(..., gt=0)
+    
+    class Config:
+        frozen = True
+```
+
+## 로깅
+
+구조화된 로깅 사용:
+
+```python
+import logging
+
+logger = logging.getLogger(__name__)
+
+# ✅ GOOD
+logger.info("주문 생성", extra={"symbol": symbol, "side": side})
+
+# ❌ BAD
+print(f"주문 생성: {symbol} {side}")
+```
+
+## 비동기 패턴
+
+- 동시 실행: `asyncio.gather()`
+- 타임아웃: `asyncio.wait_for()`
+- 재시도: exponential backoff
+
+```python
+# 동시 실행
+balances, positions = await asyncio.gather(
+    client.get_balances(),
+    client.get_positions(),
+)
+
+# 타임아웃
+try:
+    result = await asyncio.wait_for(
+        client.place_order(request),
+        timeout=10.0
+    )
+except asyncio.TimeoutError:
+    logger.warning("주문 타임아웃", extra={"request": request})
+```
+
+## 금융 계산 (Decimal 필수)
+
+**핵심 원칙**: 금액, 가격, 수량은 반드시 `Decimal` 사용. `float` 사용 금지.
+
+### Decimal 필수 사용
+
+```python
+from decimal import Decimal
+
+# ✅ GOOD - Decimal 사용
+quantity: Decimal = Decimal("0.001")
+price: Decimal = Decimal("50000.50")
+total: Decimal = quantity * price
+
+# ❌ BAD - float 사용 (정밀도 손실)
+quantity: float = 0.001
+price: float = 50000.50
+total: float = quantity * price  # 부동소수점 오류 발생 가능
+```
+
+### 문자열에서 Decimal 변환
+
+```python
+# ✅ GOOD - 문자열로 초기화 (정확)
+amount = Decimal("0.1")
+price = Decimal(api_response["price"])  # API 응답이 문자열인 경우
+
+# ❌ BAD - float 거쳐서 변환 (정밀도 손실)
+amount = Decimal(0.1)  # 부정확: 0.1000000000000000055511151231...
+amount = Decimal(float(api_response["price"]))
+```
+
+### API 응답 처리
+
+```python
+# ✅ GOOD - 문자열 직접 Decimal 변환
+position_qty = Decimal(data["positionAmt"])
+balance = Decimal(data["balance"])
+
+# 0 체크
+if position_qty != Decimal("0"):
+    ...
+
+# ❌ BAD - float 변환 후 비교
+if float(data["positionAmt"]) != 0:  # 정밀도 손실
+    ...
+```
+
+### Decimal 비교 연산
+
+```python
+from decimal import Decimal
+
+ZERO = Decimal("0")
+MIN_QTY = Decimal("0.001")
+
+# ✅ GOOD - Decimal 상수와 비교
+if quantity > ZERO:
+    ...
+
+if quantity >= MIN_QTY:
+    ...
+
+# ❌ BAD - 정수/float와 비교 (암묵적 변환)
+if quantity > 0:      # 동작하지만 명시적이지 않음
+if quantity > 0.0:    # float 비교 위험
+```
+
+### Dataclass / Pydantic에서 사용
+
+```python
+from decimal import Decimal
+from dataclasses import dataclass
+from pydantic import BaseModel, Field
+
+# Dataclass
+@dataclass
+class Position:
+    qty: Decimal
+    entry_price: Decimal
+    unrealized_pnl: Decimal
+
+# Pydantic
+class OrderRequest(BaseModel):
+    quantity: Decimal = Field(..., gt=0)
+    price: Decimal | None = Field(None, gt=0)
+```
+
+### 금지 패턴
+
+```python
+# ❌ 금액/수량에 float 타입 사용
+price: float = 50000.50
+quantity: float = 0.001
+
+# ❌ float() 변환 후 비교
+if float(position_amt) != 0:
+    ...
+
+# ❌ round() 로 정밀도 보정 시도
+total = round(float(price) * float(qty), 8)
+
+# ✅ Decimal quantize() 사용
+from decimal import ROUND_DOWN
+total = (price * qty).quantize(Decimal("0.00000001"), rounding=ROUND_DOWN)
+```
+
+## 크로스 플랫폼 (Windows 개발 → Linux 운영)
+
+**필수 원칙**: 개발은 Windows, 운영은 Linux. 모든 코드는 양쪽에서 동작해야 함.
+
+### 경로 처리 - pathlib 필수
+
+```python
+from pathlib import Path
+
+# ✅ GOOD - pathlib 사용 (OS 독립적)
+BASE_DIR = Path(__file__).parent.parent
+config_path = BASE_DIR / "config" / "secrets.yaml"
+db_path = BASE_DIR / "data" / "alphaengine.db"
+
+# ❌ BAD - 문자열 경로 (OS 종속적)
+config_path = "config/secrets.yaml"           # Linux만 동작
+config_path = "config\\secrets.yaml"          # Windows만 동작
+config_path = os.path.join("config", "file")  # pathlib이 더 명확
+
+# ✅ GOOD - 문자열 변환이 필요할 때
+str(config_path)  # 라이브러리에 전달 시
+```
+
+### 경로 금지 패턴
+
+```python
+# ❌ 하드코딩된 경로 구분자
+path = "data/file.db"
+path = "data\\file.db"
+
+# ❌ os.path 사용 (pathlib으로 대체)
+import os
+os.path.join("a", "b")
+os.path.dirname(__file__)
+
+# ❌ 플랫폼 특정 코드 (불가피한 경우 주석 필수)
+if sys.platform == "win32":
+    ...
+```
+
+### 파일 I/O
+
+```python
+# ✅ GOOD - 인코딩 명시
+with open(path, encoding="utf-8") as f:
+    data = f.read()
+
+# ✅ GOOD - pathlib read/write
+content = config_path.read_text(encoding="utf-8")
+db_path.parent.mkdir(parents=True, exist_ok=True)
+
+# ❌ BAD - 인코딩 미지정 (Windows/Linux 기본값 다름)
+with open(path) as f:
+    data = f.read()
+```
+
+### 프로젝트 루트 접근 패턴
+
+```python
+# core/constants.py
+from pathlib import Path
+
+# 프로젝트 루트 (이 파일 기준 2단계 상위)
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+class Paths:
+    """프로젝트 경로 상수"""
+    CONFIG_DIR = PROJECT_ROOT / "config"
+    DATA_DIR = PROJECT_ROOT / "data"
+    SECRETS_FILE = CONFIG_DIR / "secrets.yaml"
+    PROD_DB = DATA_DIR / "alphaengine_prod.db"
+    TEST_DB = DATA_DIR / "alphaengine_test.db"
+```

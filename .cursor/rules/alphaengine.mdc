@@ -1,0 +1,172 @@
+---
+description: AlphaEngine v2 프로젝트 룰
+alwaysApply: true
+---
+
+# AlphaEngine v2 프로젝트 룰
+
+## 프로젝트 개요
+
+Binance Futures 자동 매매 시스템:
+- **Hybrid 방식**: WebSocket (실시간) + REST (정합)
+- **아키텍처**: Bot + Web (SQLite 공유)
+- **단일 범위**: 계좌 1개, 심볼 1개, 전략 1개
+
+## 핵심 원칙
+
+1. 모든 상태 변경은 Event로 기록
+2. 전략은 거래소 API 직접 호출 금지
+3. UI/Web은 Command로만 상태 변경
+4. 모든 Command는 idempotent
+5. Exchange가 최종 진실 (Reconciler 필수)
+6. WebSocket은 힌트, REST가 최종 정합
+
+## 설정 관리 (3단계)
+
+| 분류 | 저장 위치 | 내용 |
+|------|----------|------|
+| 보안 | `config/secrets.yaml` | API Key, Secret, mode |
+| 런타임 | DB `config_store` | 전략, 리스크, 심볼 |
+| 상수 | `core/constants.py` | Binance URL, 기본값 |
+
+```yaml
+# config/secrets.yaml (git ignore 필수)
+mode: testnet
+production:
+  api_key: "xxx"
+  api_secret: "xxx"
+testnet:
+  api_key: "xxx"
+  api_secret: "xxx"
+web:
+  secret_key: "xxx"
+```
+
+## 개발 순서 (Foundation First)
+
+```
+Dev-Phase 0: 핵심 유틸리티 (외부 의존성 0, pytest 100%)
+Dev-Phase 1: 어댑터 (Protocol + Mock)
+Dev-Phase 2: Testnet E2E 시나리오 검증
+Dev-Phase 3: Thin Slice (최소 동작 흐름)
+Dev-Phase 4: 스켈레톤 (Bot/Web)
+Dev-Phase 5: 코어 로직
+Dev-Phase 6: 통합 및 운영
+```
+
+## 디렉토리 구조
+
+```
+alphaengine/
+├── bot/           # Bot 프로세스
+├── web/           # Web 프로세스 (FastAPI)
+├── core/          # 공통 코어
+│   ├── constants.py   # 하드코딩 상수
+│   ├── types.py       # Enum, Dataclass
+│   ├── config/        # 설정 로더
+│   └── domain/        # Event, Command
+├── adapters/      # 외부 연동
+│   ├── interfaces.py  # Protocol 정의
+│   ├── binance/       # Binance 클라이언트
+│   └── mock/          # Mock 클라이언트
+├── strategies/    # 전략 플러그인
+├── config/        # 설정 파일
+│   └── secrets.yaml   # (git ignore)
+├── data/          # DB 파일
+│   ├── alphaengine_prod.db
+│   └── alphaengine_test.db
+└── docs/
+    ├── plan/      # 설계 문서 (PRD, TRD, ADR 등)
+    └── deploy/    # 배포/운영 문서 (setup, systemd, backup 등)
+```
+
+## SQLite 규칙
+
+- WAL 모드 필수
+- **alias 금지**: `time`, `count` 예약어 사용 불가
+
+```python
+# ❌ BAD
+cursor.execute("SELECT created_at as time FROM events")
+
+# ✅ GOOD  
+cursor.execute("SELECT created_at as event_time FROM events")
+```
+
+## 도메인 용어
+
+| 용어 | 설명 |
+|------|------|
+| Event | 상태 변경 기록 (불변) |
+| Command | 행위 요청 (idempotent) |
+| Projection | Event에서 파생된 현재 상태 (재생성 가능) |
+| Reconciler | 거래소 vs 내부 상태 정합 |
+| dedup_key | 중복 이벤트 방지 키 |
+
+## dedup_key 패턴
+
+```python
+# TradeExecuted
+f"{exchange}:{venue}:{symbol}:trade:{exchange_trade_id}"
+
+# Order*
+f"{exchange}:{venue}:{symbol}:order:{exchange_order_id}"
+```
+
+## client_order_id 규칙
+
+```python
+client_order_id = f"ae-{command_id}"
+```
+
+## 거래 기본값
+
+- **Timeframe**: 5분봉 (5m)
+- **Venue**: FUTURES
+- **Exchange**: BINANCE
+
+## 크로스 플랫폼 (Windows 개발 → Linux 운영)
+
+| 환경 | OS | 용도 |
+|------|-----|------|
+| 개발 | Windows | 코드 작성, 로컬 테스트 |
+| 운영 | Linux (Ubuntu) | 24/7 Bot + Web 실행 |
+
+**필수 규칙**:
+
+```python
+from pathlib import Path
+
+# ✅ GOOD - pathlib 사용
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+config_path = PROJECT_ROOT / "config" / "secrets.yaml"
+
+# ❌ BAD - 문자열 경로
+config_path = "config/secrets.yaml"
+```
+
+- 모든 경로는 `pathlib.Path` 필수
+- `os.path` 사용 금지
+- 파일 I/O 시 `encoding="utf-8"` 명시
+- 상세 규칙: `python-general.mdc` 참조
+
+## 배포 문서화 (docs/deploy/)
+
+배포 및 운영 관련 결정 사항은 반드시 `docs/deploy/` 디렉토리에 문서화:
+
+```
+docs/deploy/
+├── README.md           # 배포 개요 및 퀵 가이드
+├── setup.md            # 서버 초기 설정 (의존성, 사용자, 디렉토리)
+├── systemd.md          # systemd 서비스 설정
+├── nginx.md            # nginx 리버스 프록시 설정 (필요시)
+├── backup.md           # DB 백업/복구 절차
+├── monitoring.md       # 로그, 모니터링, 알림 설정
+└── troubleshooting.md  # 운영 중 문제 해결 가이드
+```
+
+**원칙**:
+- 배포/운영 관련 결정 시 즉시 문서화
+- 명령어는 복사-붙여넣기 가능하게 작성
+- 설정 파일은 전체 내용 포함
+- 문제 해결 사례는 발생 즉시 기록
