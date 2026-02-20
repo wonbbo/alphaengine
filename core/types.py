@@ -129,6 +129,27 @@ class WebSocketState(str, Enum):
     RECONNECTING = "RECONNECTING"
 
 
+class TransferType(str, Enum):
+    """이체 타입 (입금/출금)"""
+
+    DEPOSIT = "DEPOSIT"  # Upbit KRW -> Binance Futures USDT
+    WITHDRAW = "WITHDRAW"  # Binance Futures USDT -> Upbit KRW
+
+
+class TransferStatus(str, Enum):
+    """이체 상태"""
+
+    PENDING = "PENDING"  # 요청됨, 대기 중
+    PURCHASING = "PURCHASING"  # TRX 매수 중
+    SENDING = "SENDING"  # 블록체인 전송 중
+    CONFIRMING = "CONFIRMING"  # 컨펌 대기 (입금 확인 중)
+    CONVERTING = "CONVERTING"  # 환전 중 (TRX <-> USDT/KRW)
+    TRANSFERRING = "TRANSFERRING"  # 내부 이체 중 (Spot <-> Futures)
+    COMPLETED = "COMPLETED"  # 완료
+    FAILED = "FAILED"  # 실패
+    CANCELLED = "CANCELLED"  # 취소됨
+
+
 @dataclass(frozen=True)
 class Scope:
     """거래 범위 (불변)

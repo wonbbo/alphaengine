@@ -1,0 +1,148 @@
+/* AlphaEngine Web UI Styles */
+
+:root {
+    --ae-primary: #0d6efd;
+    --ae-success: #198754;
+    --ae-danger: #dc3545;
+    --ae-warning: #ffc107;
+    --ae-info: #0dcaf0;
+}
+
+body {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+main {
+    flex: 1;
+}
+
+.navbar-brand {
+    font-weight: bold;
+}
+
+.card {
+    box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
+}
+
+.card-header {
+    font-weight: 600;
+}
+
+/* 입출금 상태 */
+.balance-info {
+    background-color: #f8f9fa;
+    border-radius: 0.5rem;
+    padding: 1rem;
+}
+
+.balance-label {
+    color: #6c757d;
+    font-size: 0.875rem;
+}
+
+.balance-value {
+    font-size: 1.25rem;
+    font-weight: bold;
+}
+
+/* 진행 상태 */
+.progress {
+    border-radius: 0.5rem;
+}
+
+.progress-bar {
+    transition: width 0.5s ease;
+}
+
+/* 상태 배지 */
+.status-badge {
+    font-size: 0.75rem;
+    padding: 0.35em 0.65em;
+}
+
+.status-pending {
+    background-color: var(--ae-warning);
+    color: #212529;
+}
+
+.status-purchasing {
+    background-color: var(--ae-info);
+    color: #212529;
+}
+
+.status-sending {
+    background-color: var(--ae-primary);
+}
+
+.status-confirming {
+    background-color: var(--ae-info);
+}
+
+.status-converting {
+    background-color: var(--ae-warning);
+    color: #212529;
+}
+
+.status-transferring {
+    background-color: var(--ae-primary);
+}
+
+.status-completed {
+    background-color: var(--ae-success);
+}
+
+.status-failed {
+    background-color: var(--ae-danger);
+}
+
+.status-cancelled {
+    background-color: #6c757d;
+}
+
+/* 테이블 */
+.table th {
+    font-weight: 600;
+    background-color: #f8f9fa;
+}
+
+.table-hover tbody tr:hover {
+    cursor: pointer;
+}
+
+/* 반응형 */
+@media (max-width: 768px) {
+    .balance-value {
+        font-size: 1rem;
+    }
+    
+    .card-header h5 {
+        font-size: 1rem;
+    }
+}
+
+/* 애니메이션 */
+@keyframes pulse {
+    0% { opacity: 1; }
+    50% { opacity: 0.5; }
+    100% { opacity: 1; }
+}
+
+.pulse {
+    animation: pulse 2s infinite;
+}
+
+/* 로딩 오버레이 */
+.loading-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(255, 255, 255, 0.8);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 10;
+}

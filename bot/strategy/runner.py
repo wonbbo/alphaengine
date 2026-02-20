@@ -13,7 +13,7 @@ from core.domain.events import Event, EventTypes
 from core.storage.event_store import EventStore
 from core.storage.command_store import CommandStore
 from core.types import Scope
-from strategies.base import Strategy, StrategyTickContext
+from strategies.base import Strategy, StrategyTickContext, TradeEvent, OrderEvent
 from bot.strategy.context import ContextBuilder
 from bot.strategy.emitter import CommandEmitterImpl
 
@@ -66,6 +66,8 @@ class StrategyRunner:
         risk_guard: Any = None,
         market_data_provider: Any = None,
         engine_mode_getter: Any = None,
+        risk_config_getter: Any = None,
+        config_store: Any = None,
     ):
         self.event_store = event_store
         self.command_store = command_store
@@ -74,6 +76,8 @@ class StrategyRunner:
         self.risk_guard = risk_guard
         self.market_data_provider = market_data_provider
         self.engine_mode_getter = engine_mode_getter
+        self.risk_config_getter = risk_config_getter
+        self.config_store = config_store
         
         # 전략 인스턴스
         self._strategy: Strategy | None = None
@@ -95,6 +99,13 @@ class StrategyRunner:
         self._tick_count = 0
         self._error_count = 0
         self._last_tick_time: datetime | None = None
+        
+        # 이벤트 콜백 통계
+        self._trade_event_count = 0
+        self._order_event_count = 0
+        
+        # 상태 저장 추적 (마지막 저장된 거래 수)
+        self._last_saved_trade_count = 0
     
     async def load_strategy(
         self,
@@ -209,14 +220,11 @@ class StrategyRunner:
         
         self._is_running = True
         
+        # DB에서 저장된 전략 상태 복원
+        await self._restore_strategy_state()
+        
         # 시작 컨텍스트 구성
-        engine_mode = await self._get_engine_mode()
-        ctx = await self._context_builder.build(
-            projector=self.projector,
-            market_data_provider=self.market_data_provider,
-            engine_mode=engine_mode,
-            strategy_state=self._strategy_state,
-        )
+        ctx = await self._build_context()
         
         # on_start 콜백
         await self._strategy.on_start(ctx)
@@ -233,16 +241,13 @@ class StrategyRunner:
         self._is_running = False
         
         # 종료 컨텍스트 구성
-        engine_mode = await self._get_engine_mode()
-        ctx = await self._context_builder.build(
-            projector=self.projector,
-            market_data_provider=self.market_data_provider,
-            engine_mode=engine_mode,
-            strategy_state=self._strategy_state,
-        )
+        ctx = await self._build_context()
         
         # on_stop 콜백
         await self._strategy.on_stop(ctx)
+        
+        # 전략 상태 DB에 저장 (종료 시 반드시)
+        await self._save_strategy_state()
         
         await self._record_strategy_event("stopped")
         
@@ -263,13 +268,7 @@ class StrategyRunner:
         
         try:
             # 컨텍스트 구성
-            engine_mode = await self._get_engine_mode()
-            ctx = await self._context_builder.build(
-                projector=self.projector,
-                market_data_provider=self.market_data_provider,
-                engine_mode=engine_mode,
-                strategy_state=self._strategy_state,
-            )
+            ctx = await self._build_context()
             
             # on_tick 호출
             await self._strategy.on_tick(ctx, self._emitter)
@@ -286,13 +285,7 @@ class StrategyRunner:
             
             # on_error 콜백
             try:
-                engine_mode = await self._get_engine_mode()
-                ctx = await self._context_builder.build(
-                    projector=self.projector,
-                    market_data_provider=self.market_data_provider,
-                    engine_mode=engine_mode,
-                    strategy_state=self._strategy_state,
-                )
+                ctx = await self._build_context()
                 
                 should_continue = await self._strategy.on_error(e, ctx)
                 
@@ -313,6 +306,28 @@ class StrategyRunner:
             except Exception:
                 pass
         return "RUNNING"
+    
+    async def _get_risk_config(self) -> dict[str, Any] | None:
+        """리스크/리워드 설정 조회"""
+        if self.risk_config_getter:
+            try:
+                return await self.risk_config_getter()
+            except Exception:
+                pass
+        return None
+    
+    async def _build_context(self) -> StrategyTickContext:
+        """표준 컨텍스트 구성 (중복 제거용)"""
+        engine_mode = await self._get_engine_mode()
+        risk_config = await self._get_risk_config()
+        
+        return await self._context_builder.build(
+            projector=self.projector,
+            market_data_provider=self.market_data_provider,
+            engine_mode=engine_mode,
+            strategy_state=self._strategy_state,
+            risk_config=risk_config,
+        )
     
     async def _record_strategy_event(self, action: str) -> None:
         """전략 이벤트 기록"""
@@ -361,6 +376,8 @@ class StrategyRunner:
             "is_running": self._is_running,
             "tick_count": self._tick_count,
             "error_count": self._error_count,
+            "trade_event_count": self._trade_event_count,
+            "order_event_count": self._order_event_count,
             "last_tick_time": self._last_tick_time.isoformat() if self._last_tick_time else None,
         }
     
@@ -369,3 +386,227 @@ class StrategyRunner:
         self._tick_count = 0
         self._error_count = 0
         self._last_tick_time = None
+        self._trade_event_count = 0
+    
+    # =========================================================================
+    # 전략 상태 저장/복원 (Bot 재시작 시 유지)
+    # =========================================================================
+    
+    async def _restore_strategy_state(self) -> None:
+        """DB에서 저장된 전략 상태 복원
+        
+        Bot 재시작 시 호출되어 account_equity, trade_count 등을 복원.
+        """
+        if not self.config_store:
+            logger.debug("ConfigStore not available, skipping state restore")
+            return
+        
+        try:
+            saved_state = await self.config_store.get_strategy_state()
+            
+            # 저장된 값이 있으면 strategy_state에 설정
+            if saved_state:
+                account_equity = saved_state.get("account_equity", "0")
+                trade_count = saved_state.get("trade_count_since_reset", 0)
+                total_count = saved_state.get("total_trade_count", 0)
+                
+                # "0"이 아닌 유효한 값이 있으면 복원
+                if account_equity != "0":
+                    self._strategy_state["account_equity"] = account_equity
+                    self._strategy_state["trade_count_since_reset"] = trade_count
+                    self._strategy_state["total_trade_count"] = total_count
+                    self._last_saved_trade_count = total_count
+                    
+                    logger.info(
+                        f"Restored strategy state: "
+                        f"equity={account_equity}, "
+                        f"trades_since_reset={trade_count}, "
+                        f"total_trades={total_count}"
+                    )
+                    
+        except Exception as e:
+            logger.warning(f"Failed to restore strategy state: {e}")
+    
+    async def _save_strategy_state(self) -> None:
+        """현재 전략 상태를 DB에 저장
+        
+        거래 종료 시 또는 종료 시 호출하여 상태 보존.
+        """
+        if not self.config_store:
+            return
+        
+        try:
+            account_equity = self._strategy_state.get("account_equity")
+            trade_count = self._strategy_state.get("trade_count_since_reset", 0)
+            total_count = self._strategy_state.get("total_trade_count", 0)
+            
+            if account_equity is not None:
+                await self.config_store.save_strategy_state(
+                    account_equity=str(account_equity),
+                    trade_count_since_reset=trade_count,
+                    total_trade_count=total_count,
+                )
+                self._last_saved_trade_count = total_count
+                
+                logger.debug(
+                    f"Saved strategy state: "
+                    f"equity={account_equity}, "
+                    f"total_trades={total_count}"
+                )
+                
+        except Exception as e:
+            logger.warning(f"Failed to save strategy state: {e}")
+    
+    async def _maybe_save_strategy_state(self) -> None:
+        """거래 수 변경 시 상태 저장 (매 거래 후)
+        
+        total_trade_count가 변경되었으면 저장.
+        """
+        total_count = self._strategy_state.get("total_trade_count", 0)
+        
+        if total_count != self._last_saved_trade_count:
+            await self._save_strategy_state()
+        self._order_event_count = 0
+    
+    # =========================================================================
+    # 이벤트 기반 콜백 핸들러
+    # 
+    # WebSocket에서 실시간 이벤트 발생 시 BotEngine을 통해 호출됨.
+    # 전략의 on_trade(), on_order_update() 콜백을 즉시 실행.
+    # =========================================================================
+    
+    async def handle_trade_event(self, trade: TradeEvent) -> bool:
+        """체결 이벤트 처리
+        
+        WebSocket ORDER_TRADE_UPDATE에서 체결 발생 시 호출.
+        전략의 on_trade() 콜백을 즉시 실행.
+        
+        Args:
+            trade: 체결 이벤트
+            
+        Returns:
+            True: 정상 처리
+            False: 에러 또는 미처리
+        """
+        if not self._strategy or not self._is_running or not self._emitter:
+            return False
+        
+        # 심볼 필터링
+        if trade.symbol != self.scope.symbol:
+            return False
+        
+        self._trade_event_count += 1
+        
+        try:
+            # 컨텍스트 구성 (실시간)
+            ctx = await self._build_context()
+            
+            # on_trade 콜백 호출
+            await self._strategy.on_trade(trade, ctx, self._emitter)
+            
+            logger.debug(
+                f"Strategy on_trade executed",
+                extra={
+                    "strategy": self._strategy.name,
+                    "trade_id": trade.trade_id,
+                    "side": trade.side,
+                    "qty": str(trade.quantity),
+                    "price": str(trade.price),
+                },
+            )
+            
+            return True
+            
+        except Exception as e:
+            self._error_count += 1
+            
+            logger.error(
+                f"Strategy on_trade error: {self._strategy.name}",
+                extra={"error": str(e), "trade_id": trade.trade_id},
+            )
+            
+            # on_error 콜백
+            try:
+                ctx = await self._build_context()
+                
+                should_continue = await self._strategy.on_error(e, ctx)
+                
+                if not should_continue:
+                    logger.warning(
+                        f"Strategy stopped due to on_trade error: {self._strategy.name}"
+                    )
+                    self._is_running = False
+                    
+            except Exception as inner_e:
+                logger.error(f"Strategy on_error failed: {inner_e}")
+            
+            return False
+    
+    async def handle_order_event(self, order: OrderEvent) -> bool:
+        """주문 상태 변경 이벤트 처리
+        
+        WebSocket ORDER_TRADE_UPDATE에서 주문 상태 변경 시 호출.
+        전략의 on_order_update() 콜백을 즉시 실행.
+        
+        Args:
+            order: 주문 이벤트
+            
+        Returns:
+            True: 정상 처리
+            False: 에러 또는 미처리
+        """
+        if not self._strategy or not self._is_running or not self._emitter:
+            return False
+        
+        # 심볼 필터링
+        if order.symbol != self.scope.symbol:
+            return False
+        
+        self._order_event_count += 1
+        
+        try:
+            # 컨텍스트 구성 (실시간)
+            ctx = await self._build_context()
+            
+            # on_order_update 콜백 호출
+            await self._strategy.on_order_update(order, ctx, self._emitter)
+            
+            # 거래 수 변경 시 상태 저장 (손절/익절 체결 등)
+            await self._maybe_save_strategy_state()
+            
+            logger.debug(
+                f"Strategy on_order_update executed",
+                extra={
+                    "strategy": self._strategy.name,
+                    "order_id": order.order_id,
+                    "status": order.status,
+                    "type": order.order_type,
+                },
+            )
+            
+            return True
+            
+        except Exception as e:
+            self._error_count += 1
+            
+            logger.error(
+                f"Strategy on_order_update error: {self._strategy.name}",
+                extra={"error": str(e), "order_id": order.order_id},
+            )
+            
+            # on_error 콜백
+            try:
+                ctx = await self._build_context()
+                
+                should_continue = await self._strategy.on_error(e, ctx)
+                
+                if not should_continue:
+                    logger.warning(
+                        f"Strategy stopped due to on_order_update error: {self._strategy.name}"
+                    )
+                    self._is_running = False
+                    
+            except Exception as inner_e:
+                logger.error(f"Strategy on_error failed: {inner_e}")
+            
+            return False

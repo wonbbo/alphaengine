@@ -12,6 +12,7 @@ from bot.risk.rules import (
     MaxOpenOrdersRule,
     EngineModeRule,
 )
+from bot.risk.pnl_calculator import PnLCalculator
 
 __all__ = [
     "RiskGuard",
@@ -20,4 +21,5 @@ __all__ = [
     "DailyLossLimitRule",
     "MaxOpenOrdersRule",
     "EngineModeRule",
+    "PnLCalculator",
 ]

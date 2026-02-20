@@ -27,6 +27,7 @@ from core.domain.events import Event
 from core.domain.state_machines import EngineStateMachine, EngineState
 from core.storage.command_store import CommandStore
 from core.storage.event_store import EventStore
+from core.storage.config_store import ConfigStore, init_default_configs
 from core.types import Scope, WebSocketState
 
 from bot.websocket.listener import WebSocketListener
@@ -36,6 +37,12 @@ from bot.executor.executor import CommandExecutor
 from bot.projector.projector import EventProjector
 from bot.risk.guard import RiskGuard
 from bot.strategy.runner import StrategyRunner
+from bot.market_data.provider import MarketDataProvider
+from bot.transfer.manager import TransferManager
+from bot.bnb_fee.manager import BnbFeeManager
+from adapters.slack.notifier import SlackNotifier
+from adapters.upbit.rest_client import UpbitRestClient
+from core.constants import Paths
 
 logging.basicConfig(
     level=logging.INFO,
@@ -68,6 +75,7 @@ class BotEngine:
         # 스토리지
         self.event_store = EventStore(db)
         self.command_store = CommandStore(db)
+        self.config_store = ConfigStore(db)
         
         # REST 클라이언트
         self.rest_client = self._create_rest_client()
@@ -80,6 +88,14 @@ class BotEngine:
         self.ws_listener: WebSocketListener | None = None
         self.reconciler: HybridReconciler | None = None
         self.strategy_runner: StrategyRunner | None = None
+        self.market_data_provider: MarketDataProvider | None = None
+        self.notifier: SlackNotifier | None = None
+        self.transfer_manager: TransferManager | None = None
+        self.upbit_client: UpbitRestClient | None = None
+        self.bnb_fee_manager: BnbFeeManager | None = None
+        
+        # 전략 설정 (secrets.yaml 또는 config에서 로드)
+        self.strategy_config = self._load_strategy_config()
         
         # 설정
         self.target_symbol = settings.target_symbol if hasattr(settings, 'target_symbol') else "XRPUSDT"
@@ -123,9 +139,145 @@ class BotEngine:
             api_secret=self.settings.api_secret,
         )
     
+    def _load_strategy_config(self) -> dict[str, Any]:
+        """전략 설정 로드 (secrets.yaml의 strategy 섹션)"""
+        import yaml
+        
+        try:
+            if Paths.SECRETS_FILE.exists():
+                with open(Paths.SECRETS_FILE, encoding="utf-8") as f:
+                    data = yaml.safe_load(f)
+                    return data.get("strategy", {})
+        except Exception as e:
+            logger.warning(f"전략 설정 로드 실패: {e}")
+        
+        return {}
+    
+    def _create_notifier(self) -> SlackNotifier | None:
+        """Slack Notifier 생성 (설정이 있는 경우에만)"""
+        import yaml
+        
+        try:
+            if not Paths.SECRETS_FILE.exists():
+                return None
+            
+            with open(Paths.SECRETS_FILE, encoding="utf-8") as f:
+                data = yaml.safe_load(f)
+            
+            slack_config = data.get("slack", {})
+            webhook_url = slack_config.get("webhook_url", "")
+            
+            if not webhook_url:
+                logger.info("Slack webhook_url이 설정되지 않아 알림 비활성화")
+                return None
+            
+            channel = slack_config.get("channel", "")
+            
+            notifier = SlackNotifier(
+                webhook_url=webhook_url,
+                channel=channel if channel else None,
+                timeout=10.0,
+            )
+            
+            logger.info(f"SlackNotifier 생성 완료 (channel: {channel or 'default'})")
+            return notifier
+            
+        except Exception as e:
+            logger.warning(f"SlackNotifier 생성 실패: {e}")
+            return None
+    
+    def _load_transfer_config(self) -> dict[str, Any]:
+        """입출금 설정 로드 (secrets.yaml의 upbit, binance 섹션)
+        
+        Returns:
+            입출금 설정 딕셔너리:
+            - upbit_api_key, upbit_api_secret, upbit_trx_address
+            - binance_trx_address
+        """
+        import yaml
+        
+        config: dict[str, Any] = {
+            "upbit_api_key": "",
+            "upbit_api_secret": "",
+            "upbit_trx_address": "",
+            "binance_trx_address": "",
+        }
+        
+        try:
+            if not Paths.SECRETS_FILE.exists():
+                return config
+            
+            with open(Paths.SECRETS_FILE, encoding="utf-8") as f:
+                data = yaml.safe_load(f)
+            
+            # Upbit 설정
+            upbit_config = data.get("upbit", {})
+            config["upbit_api_key"] = upbit_config.get("api_key", "")
+            config["upbit_api_secret"] = upbit_config.get("api_secret", "")
+            config["upbit_trx_address"] = upbit_config.get("trx_deposit_address", "")
+            
+            # Binance TRX 주소
+            binance_config = data.get("binance", {})
+            config["binance_trx_address"] = binance_config.get("trx_deposit_address", "")
+            
+        except Exception as e:
+            logger.warning(f"입출금 설정 로드 실패: {e}")
+        
+        return config
+    
+    async def _init_transfer_manager(self) -> TransferManager | None:
+        """TransferManager 초기화 (Upbit/Binance 설정이 있는 경우에만)
+        
+        Returns:
+            TransferManager 인스턴스 또는 None
+        """
+        config = self._load_transfer_config()
+        
+        # 필수 설정 확인
+        if not config["upbit_api_key"] or not config["upbit_api_secret"]:
+            logger.info("Upbit API 설정이 없어 입출금 기능 비활성화")
+            return None
+        
+        if not config["upbit_trx_address"]:
+            logger.info("Upbit TRX 주소가 없어 입출금 기능 비활성화")
+            return None
+        
+        if not config["binance_trx_address"]:
+            logger.info("Binance TRX 주소가 없어 입출금 기능 비활성화")
+            return None
+        
+        try:
+            # Upbit 클라이언트 생성
+            self.upbit_client = UpbitRestClient(
+                api_key=config["upbit_api_key"],
+                api_secret=config["upbit_api_secret"],
+            )
+            
+            # TransferManager 생성
+            transfer_manager = TransferManager(
+                db=self.db,
+                upbit=self.upbit_client,
+                binance=self.rest_client,
+                event_store=self.event_store,
+                scope=self.scope,
+                binance_trx_address=config["binance_trx_address"],
+                upbit_trx_address=config["upbit_trx_address"],
+            )
+            
+            logger.info("TransferManager 초기화 완료")
+            return transfer_manager
+            
+        except Exception as e:
+            logger.warning(f"TransferManager 초기화 실패: {e}")
+            return None
+    
     async def initialize(self) -> None:
         """컴포넌트 초기화"""
         logger.info("Bot 컴포넌트 초기화 시작...")
+        
+        # 0. ConfigStore 기본값 초기화
+        await self.config_store.ensure_defaults()
+        logger.info("  - ConfigStore 기본값 확인 완료")
         
         scope_with_symbol = self._scope_with_symbol()
         
@@ -133,13 +285,14 @@ class BotEngine:
         self.projector = EventProjector(self.db, self.event_store)
         logger.info("  - Projector 초기화 완료")
         
-        # 2. Risk Guard
+        # 2. Risk Guard (ConfigStore 연결)
         self.risk_guard = RiskGuard(
             event_store=self.event_store,
             projector=self.projector,
+            config_getter=self.config_store.get_risk_config,
             engine_mode_getter=self._get_engine_mode,
         )
-        logger.info("  - RiskGuard 초기화 완료")
+        logger.info("  - RiskGuard 초기화 완료 (ConfigStore 연결)")
         
         # 3. Executor
         self.executor = CommandExecutor(
@@ -183,18 +336,84 @@ class BotEngine:
         )
         logger.info("  - HybridReconciler 초기화 완료")
         
-        # 7. Strategy Runner
+        # 7. Market Data Provider
+        self.market_data_provider = MarketDataProvider(
+            rest_client=self.rest_client,
+            default_timeframe="5m",
+            default_limit=100,
+            cache_ttl_seconds=60,
+        )
+        logger.info("  - MarketDataProvider 초기화 완료")
+        
+        # 8. Strategy Runner (ConfigStore 리스크 설정 + 상태 저장 연결)
         self.strategy_runner = StrategyRunner(
             event_store=self.event_store,
             command_store=self.command_store,
             scope=scope_with_symbol,
             projector=self.projector,
             risk_guard=self.risk_guard,
+            market_data_provider=self.market_data_provider,
             engine_mode_getter=self._get_engine_mode,
+            risk_config_getter=self.config_store.get_risk_config,
+            config_store=self.config_store,
         )
-        logger.info("  - StrategyRunner 초기화 완료")
+        logger.info("  - StrategyRunner 초기화 완료 (ConfigStore 연결, 상태 저장 활성화)")
+        
+        # 9. WebSocket ↔ StrategyRunner 이벤트 콜백 연결
+        # 체결/주문 이벤트 발생 시 전략의 on_trade/on_order_update 즉시 호출
+        self.ws_listener.set_trade_callback(self.strategy_runner.handle_trade_event)
+        self.ws_listener.set_order_callback(self.strategy_runner.handle_order_event)
+        logger.info("  - WebSocket 이벤트 콜백 연결 완료")
+        
+        # 10. Slack Notifier (선택)
+        self.notifier = self._create_notifier()
+        if self.notifier:
+            logger.info("  - SlackNotifier 초기화 완료")
+        
+        # 11. TransferManager (입출금, 설정이 있는 경우에만)
+        self.transfer_manager = await self._init_transfer_manager()
+        if self.transfer_manager:
+            logger.info("  - TransferManager 초기화 완료")
+            # Web에서 사용할 수 있도록 등록
+            from web.dependencies import set_transfer_manager
+            set_transfer_manager(self.transfer_manager)
+            logger.info("  - TransferManager Web 의존성 등록 완료")
+        
+        # 12. BnbFeeManager (production 모드에서만 활성화)
+        self.bnb_fee_manager = await self._init_bnb_fee_manager()
+        if self.bnb_fee_manager:
+            logger.info("  - BnbFeeManager 초기화 완료")
         
         logger.info("Bot 컴포넌트 초기화 완료")
+    
+    async def _init_bnb_fee_manager(self) -> BnbFeeManager | None:
+        """BnbFeeManager 초기화 (production 모드에서만 활성화)
+        
+        Testnet은 Spot API가 제한적이므로 production에서만 동작.
+        
+        Returns:
+            BnbFeeManager 인스턴스 또는 None
+        """
+        # Testnet에서는 비활성화 (Spot API 제한)
+        if self.settings.mode.value == "testnet":
+            logger.info("Testnet 모드: BNB 자동 충전 비활성화 (Spot API 제한)")
+            return None
+        
+        try:
+            bnb_fee_manager = BnbFeeManager(
+                binance=self.rest_client,
+                config_store=self.config_store,
+                event_store=self.event_store,
+                scope=self.scope,
+                notifier_callback=self._send_notification,
+            )
+            
+            logger.info("BnbFeeManager 초기화 완료 (production 모드)")
+            return bnb_fee_manager
+            
+        except Exception as e:
+            logger.warning(f"BnbFeeManager 초기화 실패: {e}")
+            return None
     
     async def _get_engine_mode(self) -> str:
         """엔진 모드 조회"""
@@ -212,6 +431,98 @@ class BotEngine:
         """WebSocket 상태 변경 콜백"""
         if self.reconciler:
             self.reconciler.set_ws_state(new_state)
+    
+    async def _send_notification(
+        self,
+        message: str,
+        level: str = "INFO",
+        extra: dict[str, Any] | None = None,
+    ) -> None:
+        """Slack 알림 전송 (notifier가 있는 경우에만)"""
+        if self.notifier:
+            try:
+                await self.notifier.send(message, level=level, extra=extra)
+            except Exception as e:
+                logger.warning(f"Slack 알림 전송 실패: {e}")
+    
+    async def send_trade_notification(
+        self,
+        symbol: str,
+        side: str,
+        quantity: str,
+        price: str,
+        pnl: str | None = None,
+    ) -> None:
+        """거래 알림 전송 (외부에서 호출 가능)"""
+        if self.notifier:
+            try:
+                await self.notifier.send_trade_alert(
+                    symbol=symbol,
+                    side=side,
+                    quantity=quantity,
+                    price=price,
+                    pnl=pnl,
+                )
+            except Exception as e:
+                logger.warning(f"거래 알림 전송 실패: {e}")
+    
+    async def _load_and_start_strategy(self) -> None:
+        """전략 자동 로드 및 시작
+        
+        secrets.yaml의 strategy 섹션에서 설정을 읽어 전략을 로드.
+        설정이 없으면 기본 전략(SmaCrossStrategy) 로드.
+        
+        secrets.yaml 예시:
+        ```yaml
+        strategy:
+          module: strategies.examples.sma_cross
+          class: SmaCrossStrategy
+          params:
+            fast_period: 5
+            slow_period: 20
+            quantity: "10"
+        ```
+        """
+        if not self.strategy_runner:
+            logger.warning("StrategyRunner가 없어 전략 로드 건너뜀")
+            return
+        
+        # 설정에서 전략 정보 로드
+        module_path = self.strategy_config.get("module", "strategies.examples.sma_cross")
+        class_name = self.strategy_config.get("class", "SmaCrossStrategy")
+        params = self.strategy_config.get("params", {})
+        
+        # 전략 자동 시작 여부 (기본: True)
+        auto_start = self.strategy_config.get("auto_start", True)
+        
+        logger.info(f"전략 로드 시도: {module_path}.{class_name}")
+        
+        # 전략 로드
+        success = await self.strategy_runner.load_strategy(
+            module_path=module_path,
+            class_name=class_name,
+            params=params,
+        )
+        
+        if not success:
+            logger.error(f"전략 로드 실패: {module_path}.{class_name}")
+            await self._send_notification(
+                f"전략 로드 실패: {module_path}.{class_name}",
+                level="ERROR",
+            )
+            return
+        
+        logger.info(f"전략 로드 성공: {module_path}.{class_name}")
+        
+        # 자동 시작
+        if auto_start:
+            await self.strategy_runner.start()
+            logger.info(f"전략 시작됨: {class_name}")
+            
+            await self._send_notification(
+                f"전략 시작됨: {class_name} (params: {params})",
+                level="INFO",
+            )
     
     async def start(self) -> None:
         """엔진 시작"""
@@ -232,17 +543,54 @@ class BotEngine:
         if self.ws_listener:
             await self.ws_listener.start()
         
+        # TransferManager 모니터링 시작
+        if self.transfer_manager:
+            await self.transfer_manager.start_monitoring()
+            logger.info("TransferManager 모니터링 시작됨")
+        
+        # BnbFeeManager 초기 체크
+        if self.bnb_fee_manager:
+            try:
+                await self.bnb_fee_manager.check_and_replenish()
+                logger.info("BnbFeeManager 초기 체크 완료")
+            except Exception as e:
+                logger.warning(f"BnbFeeManager 초기 체크 실패: {e}")
+        
+        # 전략 자동 로드 및 시작
+        await self._load_and_start_strategy()
+        
         # 엔진 상태 전환
         self.state_machine.transition(EngineState.RUNNING)
         logger.info("Bot Engine RUNNING")
+        
+        # 시작 알림 전송
+        await self._send_notification(
+            f"Bot Engine 시작됨 (mode: {self.settings.mode.value}, symbol: {self.target_symbol})",
+            level="INFO",
+        )
     
     async def stop(self) -> None:
         """엔진 종료"""
         logger.info("Bot Engine 종료 중...")
         
+        # 종료 알림 전송
+        await self._send_notification(
+            f"Bot Engine 종료됨 (mode: {self.settings.mode.value})",
+            level="WARNING",
+        )
+        
         # 전략 종료
         if self.strategy_runner and self.strategy_runner.is_running:
             await self.strategy_runner.stop()
+        
+        # TransferManager 모니터링 종료
+        if self.transfer_manager:
+            await self.transfer_manager.stop_monitoring()
+            logger.info("TransferManager 모니터링 종료됨")
+        
+        # Upbit 클라이언트 종료
+        if self.upbit_client:
+            await self.upbit_client.close()
         
         # WebSocket 종료
         if self.ws_listener:
@@ -264,6 +612,7 @@ class BotEngine:
         2. Command Processor: 대기 중인 Command 처리
         3. Reconciler: 주기적으로 거래소 상태 동기화
         4. Strategy Runner: 전략 tick 실행
+        5. BnbFeeManager: BNB 비율 체크 및 자동 충전
         """
         logger.info("메인 루프 시작")
         
@@ -290,7 +639,12 @@ class BotEngine:
                     if self.strategy_runner and self.strategy_runner.is_running:
                         await self.strategy_runner.tick()
                 
-                # 5. Heartbeat 로그 (10초마다)
+                # 5. BnbFeeManager: BNB 비율 체크 및 자동 충전 (주기적)
+                if self.bnb_fee_manager:
+                    if await self.bnb_fee_manager.should_check():
+                        await self.bnb_fee_manager.check_and_replenish()
+                
+                # 6. Heartbeat 로그 (10초마다)
                 if self._tick_count % 100 == 0:
                     self._log_heartbeat()
                     

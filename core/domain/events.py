@@ -172,11 +172,27 @@ class EventTypes:
     INTERNAL_TRANSFER_COMPLETED: str = "InternalTransferCompleted"
     INTERNAL_TRANSFER_FAILED: str = "InternalTransferFailed"
 
-    # External Deposit / Withdraw
+    # External Deposit / Withdraw (기존)
     DEPOSIT_DETECTED: str = "DepositDetected"
     WITHDRAW_REQUESTED: str = "WithdrawRequested"
     WITHDRAW_COMPLETED: str = "WithdrawCompleted"
     WITHDRAW_FAILED: str = "WithdrawFailed"
+
+    # Deposit (Upbit KRW -> Binance Futures USDT)
+    DEPOSIT_INITIATED: str = "DepositInitiated"  # 입금 요청 시작
+    DEPOSIT_TRX_PURCHASED: str = "DepositTrxPurchased"  # Upbit TRX 매수 완료
+    DEPOSIT_TRX_SENT: str = "DepositTrxSent"  # Upbit -> Binance 전송
+    DEPOSIT_TRX_RECEIVED: str = "DepositTrxReceived"  # Binance 입금 확인
+    DEPOSIT_USDT_CONVERTED: str = "DepositUsdtConverted"  # TRX -> USDT 환전
+    DEPOSIT_COMPLETED: str = "DepositCompleted"  # Futures 이체 완료
+
+    # Withdraw (Binance Futures USDT -> Upbit KRW)
+    WITHDRAW_INITIATED: str = "WithdrawInitiated"  # 출금 요청 시작
+    WITHDRAW_FUTURES_TRANSFERRED: str = "WithdrawFuturesTransferred"  # Futures -> Spot 이체
+    WITHDRAW_TRX_PURCHASED: str = "WithdrawTrxPurchased"  # Binance TRX 매수 완료
+    WITHDRAW_TRX_SENT: str = "WithdrawTrxSent"  # Binance -> Upbit 전송
+    WITHDRAW_TRX_RECEIVED: str = "WithdrawTrxReceived"  # Upbit TRX 입금 확인
+    WITHDRAW_KRW_CONVERTED: str = "WithdrawKrwConverted"  # TRX -> KRW 환전
 
     # Reconciliation / Audit
     DRIFT_DETECTED: str = "DriftDetected"
@@ -189,6 +205,12 @@ class EventTypes:
     STRATEGY_STARTED: str = "StrategyStarted"
     STRATEGY_STOPPED: str = "StrategyStopped"
     STRATEGY_ERROR: str = "StrategyError"
+
+    # BNB Fee Management
+    BNB_BALANCE_LOW: str = "BnbBalanceLow"
+    BNB_REPLENISH_STARTED: str = "BnbReplenishStarted"
+    BNB_REPLENISH_COMPLETED: str = "BnbReplenishCompleted"
+    BNB_REPLENISH_FAILED: str = "BnbReplenishFailed"
 
     @classmethod
     def all_types(cls) -> list[str]:

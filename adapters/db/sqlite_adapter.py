@@ -357,6 +357,35 @@ async def init_schema(adapter: SQLiteAdapter) -> None:
         )
     """)
     
+    # transfers (입출금 이체 테이블)
+    await adapter.execute("""
+        CREATE TABLE IF NOT EXISTS transfers (
+            transfer_id      TEXT PRIMARY KEY,
+            transfer_type    TEXT NOT NULL,
+            status           TEXT NOT NULL,
+            
+            requested_amount TEXT NOT NULL,
+            requested_at     TEXT NOT NULL,
+            requested_by     TEXT NOT NULL,
+            
+            current_step     INTEGER DEFAULT 0,
+            total_steps      INTEGER NOT NULL,
+            
+            actual_amount    TEXT,
+            fee_amount       TEXT,
+            
+            upbit_order_id   TEXT,
+            binance_order_id TEXT,
+            blockchain_txid  TEXT,
+            
+            completed_at     TEXT,
+            error_message    TEXT,
+            
+            created_at       TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at       TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+    """)
+
     # 인덱스 생성
     await adapter.execute("""
         CREATE INDEX IF NOT EXISTS ix_event_store_ts 
@@ -376,6 +405,22 @@ async def init_schema(adapter: SQLiteAdapter) -> None:
     await adapter.execute("""
         CREATE INDEX IF NOT EXISTS ix_command_store_status 
         ON command_store(status, priority DESC, ts)
+    """)
+
+    # transfers 인덱스
+    await adapter.execute("""
+        CREATE INDEX IF NOT EXISTS ix_transfers_status 
+        ON transfers(status)
+    """)
+
+    await adapter.execute("""
+        CREATE INDEX IF NOT EXISTS ix_transfers_type 
+        ON transfers(transfer_type)
+    """)
+
+    await adapter.execute("""
+        CREATE INDEX IF NOT EXISTS ix_transfers_requested_at 
+        ON transfers(requested_at)
     """)
     
     await adapter.commit()

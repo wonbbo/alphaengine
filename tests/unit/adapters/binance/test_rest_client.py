@@ -346,3 +346,115 @@ class TestBinanceRestClientContextManager:
         
         # 종료 후 클라이언트 None 확인
         assert client._client is None
+
+
+class TestBinanceRestClientKlines:
+    """Klines(캔들) 조회 테스트"""
+    
+    @pytest.mark.asyncio
+    async def test_get_klines_success(self) -> None:
+        """캔들 조회 성공"""
+        client = BinanceRestClient(
+            base_url="https://fapi.binance.com",
+            api_key="test_key",
+            api_secret="test_secret",
+        )
+        
+        # Binance klines 응답 형식
+        mock_kline_data = [
+            [
+                1640000000000,  # open_time
+                "0.5000",       # open
+                "0.5100",       # high
+                "0.4900",       # low
+                "0.5050",       # close
+                "1000000",      # volume
+                1640000299999,  # close_time
+                "500000",       # quote_volume
+                1000,           # trades
+                "600000",       # taker_buy_volume
+                "300000",       # taker_buy_quote_volume
+                "0",            # ignore
+            ],
+        ]
+        
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = mock_kline_data
+        mock_response.headers = {}
+        
+        with patch.object(client, "_get_client") as mock_get_client:
+            mock_http_client = AsyncMock()
+            mock_http_client.request.return_value = mock_response
+            mock_get_client.return_value = mock_http_client
+            
+            klines = await client.get_klines(symbol="XRPUSDT", interval="5m", limit=100)
+            
+            assert len(klines) == 1
+            assert klines[0]["open_time"] == 1640000000000
+            assert klines[0]["open"] == "0.5000"
+            assert klines[0]["high"] == "0.5100"
+            assert klines[0]["low"] == "0.4900"
+            assert klines[0]["close"] == "0.5050"
+            assert klines[0]["volume"] == "1000000"
+    
+    @pytest.mark.asyncio
+    async def test_get_klines_with_time_params(self) -> None:
+        """시간 파라미터 전달 확인"""
+        client = BinanceRestClient(
+            base_url="https://fapi.binance.com",
+            api_key="test_key",
+            api_secret="test_secret",
+        )
+        
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = []
+        mock_response.headers = {}
+        
+        with patch.object(client, "_get_client") as mock_get_client:
+            mock_http_client = AsyncMock()
+            mock_http_client.request.return_value = mock_response
+            mock_get_client.return_value = mock_http_client
+            
+            await client.get_klines(
+                symbol="XRPUSDT",
+                interval="1h",
+                limit=500,
+                start_time=1640000000000,
+                end_time=1640100000000,
+            )
+            
+            # 요청 파라미터 확인
+            call_args = mock_http_client.request.call_args
+            params = call_args.kwargs["params"]
+            
+            assert params["symbol"] == "XRPUSDT"
+            assert params["interval"] == "1h"
+            assert params["limit"] == 500
+            assert params["startTime"] == 1640000000000
+            assert params["endTime"] == 1640100000000
+    
+    @pytest.mark.asyncio
+    async def test_get_ticker_price_success(self) -> None:
+        """현재가 조회 성공"""
+        client = BinanceRestClient(
+            base_url="https://fapi.binance.com",
+            api_key="test_key",
+            api_secret="test_secret",
+        )
+        
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {"symbol": "XRPUSDT", "price": "0.5123"}
+        mock_response.headers = {}
+        
+        with patch.object(client, "_get_client") as mock_get_client:
+            mock_http_client = AsyncMock()
+            mock_http_client.request.return_value = mock_response
+            mock_get_client.return_value = mock_http_client
+            
+            result = await client.get_ticker_price(symbol="XRPUSDT")
+            
+            assert result["symbol"] == "XRPUSDT"
+            assert result["price"] == "0.5123"

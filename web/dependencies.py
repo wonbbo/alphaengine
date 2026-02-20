@@ -4,7 +4,7 @@
 FastAPI의 Depends를 사용한 의존성 관리.
 """
 
-from typing import AsyncGenerator
+from typing import Any, AsyncGenerator
 
 from adapters.db.sqlite_adapter import SQLiteAdapter
 from core.config.loader import Settings, get_settings
@@ -34,3 +34,41 @@ async def get_db_write() -> AsyncGenerator[SQLiteAdapter, None]:
     settings = get_settings()
     async with SQLiteAdapter(settings.db_path, readonly=False) as db:
         yield db
+
+
+# =========================================================================
+# TransferManager (Bot과 공유)
+# =========================================================================
+
+# Bot 프로세스에서 설정되는 전역 TransferManager 인스턴스
+# Web과 Bot이 같은 프로세스에서 실행될 때 사용
+_transfer_manager: Any = None
+
+
+def set_transfer_manager(manager: Any) -> None:
+    """TransferManager 설정
+    
+    Bot 부트스트랩 시 호출하여 전역 인스턴스 설정.
+    
+    Args:
+        manager: TransferManager 인스턴스
+    """
+    global _transfer_manager
+    _transfer_manager = manager
+
+
+def get_transfer_manager() -> Any:
+    """TransferManager 반환
+    
+    Returns:
+        TransferManager 인스턴스
+        
+    Raises:
+        RuntimeError: TransferManager가 설정되지 않은 경우
+    """
+    if _transfer_manager is None:
+        raise RuntimeError(
+            "TransferManager not initialized. "
+            "Call set_transfer_manager() from bot bootstrap."
+        )
+    return _transfer_manager

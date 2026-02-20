@@ -1,12 +1,15 @@
 """
-SMA Cross Strategy (예제)
+SMA Cross Strategy (교육용 단순 예제)
 
 단순 이동평균 교차 전략.
 빠른 SMA가 느린 SMA를 상향 돌파하면 매수,
 하향 돌파하면 매도.
 
-주의: 이 전략은 교육 목적의 예제입니다.
-실제 거래에 사용하기 전에 충분한 백테스트가 필요합니다.
+주의: 
+- 이 전략은 교육 목적의 단순 예제입니다.
+- 고정 수량을 사용하는 단순한 구조입니다.
+- 실제 운용 시에는 AtrRiskManagedStrategy처럼 
+  리스크 기반 수량 계산을 사용하세요.
 """
 
 import logging
@@ -36,7 +39,11 @@ def calculate_sma(bars: list[Bar], period: int) -> Decimal | None:
 
 
 class SmaCrossStrategy(Strategy):
-    """SMA 크로스 전략
+    """SMA 크로스 전략 (교육용 단순 예제)
+    
+    이 전략은 고정 수량을 사용하는 단순한 예제입니다.
+    실제 운용 시에는 AtrRiskManagedStrategy를 참조하여
+    리스크 기반 수량 계산을 사용하세요.
     
     전략 로직:
     1. 빠른 SMA (기본 5)와 느린 SMA (기본 20) 계산
@@ -47,7 +54,7 @@ class SmaCrossStrategy(Strategy):
     파라미터:
     - fast_period: 빠른 SMA 기간 (기본 5)
     - slow_period: 느린 SMA 기간 (기본 20)
-    - quantity: 주문 수량 (기본 "10")
+    - fixed_quantity: 고정 주문 수량 (기본 "10") - 교육용
     - use_market_order: 시장가 주문 사용 (기본 True)
     """
     
@@ -57,18 +64,18 @@ class SmaCrossStrategy(Strategy):
     
     @property
     def version(self) -> str:
-        return "1.0.0"
+        return "1.1.0"
     
     @property
     def description(self) -> str:
-        return "Simple Moving Average Crossover Strategy"
+        return "Simple Moving Average Crossover Strategy (Educational)"
     
     @property
     def default_params(self) -> dict[str, Any]:
         return {
             "fast_period": 5,
             "slow_period": 20,
-            "quantity": "10",
+            "fixed_quantity": "10",  # 교육용 고정 수량
             "use_market_order": True,
         }
     
@@ -76,11 +83,14 @@ class SmaCrossStrategy(Strategy):
         """초기화"""
         self.fast_period = int(params.get("fast_period", 5))
         self.slow_period = int(params.get("slow_period", 20))
-        self.quantity = str(params.get("quantity", "10"))
+        self.fixed_quantity = str(params.get("fixed_quantity", "10"))
         self.use_market_order = bool(params.get("use_market_order", True))
         
         logger.info(
             f"SmaCross initialized: fast={self.fast_period}, slow={self.slow_period}",
+        )
+        logger.warning(
+            "SmaCross uses fixed quantity. For production, use risk-based sizing."
         )
     
     async def on_start(self, ctx: StrategyTickContext) -> None:
@@ -158,13 +168,13 @@ class SmaCrossStrategy(Strategy):
             # 실제로는 청산 완료 후 진입해야 하지만,
             # 간단한 예제이므로 바로 진입 주문
         
-        # 매수 주문
+        # 매수 주문 (고정 수량 - 교육용)
         order_type = "MARKET" if self.use_market_order else "LIMIT"
         
         await emit.place_order(
             side="BUY",
             order_type=order_type,
-            quantity=self.quantity,
+            quantity=self.fixed_quantity,
             price=ctx.current_price if order_type == "LIMIT" else None,
         )
     
@@ -184,13 +194,13 @@ class SmaCrossStrategy(Strategy):
             logger.info("Closing long position before sell")
             await emit.close_position(reduce_only=True)
         
-        # 매도 주문
+        # 매도 주문 (고정 수량 - 교육용)
         order_type = "MARKET" if self.use_market_order else "LIMIT"
         
         await emit.place_order(
             side="SELL",
             order_type=order_type,
-            quantity=self.quantity,
+            quantity=self.fixed_quantity,
             price=ctx.current_price if order_type == "LIMIT" else None,
         )
     

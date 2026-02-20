@@ -22,6 +22,7 @@ from bot.risk.rules import (
     EngineModeRule,
     MinBalanceRule,
 )
+from bot.risk.pnl_calculator import PnLCalculator
 
 if TYPE_CHECKING:
     from bot.projector.projector import EventProjector
@@ -68,6 +69,9 @@ class RiskGuard:
         self.projector = projector
         self.config_getter = config_getter
         self.engine_mode_getter = engine_mode_getter
+        
+        # PnL Calculator
+        self.pnl_calculator = PnLCalculator(event_store)
         
         # 규칙 목록
         self._rules: list[RiskRule] = []
@@ -229,8 +233,19 @@ class RiskGuard:
             except Exception as e:
                 logger.warning(f"Failed to get projection data: {e}")
         
-        # 일일 PnL (TODO: 별도 계산 필요)
-        context["daily_pnl"] = "0"
+        # 일일 PnL 계산
+        try:
+            daily_pnl = await self.pnl_calculator.get_daily_pnl(
+                exchange=command.scope.exchange,
+                venue=command.scope.venue,
+                account_id=command.scope.account_id,
+                mode=command.scope.mode,
+                symbol=command.scope.symbol,
+            )
+            context["daily_pnl"] = str(daily_pnl)
+        except Exception as e:
+            logger.warning(f"Failed to calculate daily PnL: {e}")
+            context["daily_pnl"] = "0"
         
         return context
     

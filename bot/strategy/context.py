@@ -39,6 +39,7 @@ class ContextBuilder:
         market_data_provider: Any = None,
         engine_mode: str = "RUNNING",
         strategy_state: dict[str, Any] | None = None,
+        risk_config: dict[str, Any] | None = None,
     ) -> StrategyTickContext:
         """컨텍스트 구성
         
@@ -47,6 +48,7 @@ class ContextBuilder:
             market_data_provider: 시장 데이터 제공자 (선택)
             engine_mode: 엔진 모드
             strategy_state: 전략 상태 (유지됨)
+            risk_config: 리스크/리워드 설정 (config_store의 "risk" 키)
             
         Returns:
             StrategyTickContext
@@ -69,6 +71,8 @@ class ContextBuilder:
             current_price=current_price,
             strategy_state=strategy_state or {},
             engine_mode=engine_mode,
+            market_data=market_data_provider,
+            risk_config=risk_config,
         )
     
     async def _get_position(self, projector: Any) -> Position | None:

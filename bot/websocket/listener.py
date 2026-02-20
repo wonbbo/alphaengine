@@ -11,7 +11,11 @@ from adapters.binance.ws_client import BinanceWsClient
 from adapters.binance.rest_client import BinanceRestClient
 from core.storage.event_store import EventStore
 from core.types import Scope, WebSocketState
-from bot.websocket.handler import WebSocketMessageHandler
+from bot.websocket.handler import (
+    WebSocketMessageHandler,
+    TradeEventCallback,
+    OrderEventCallback,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +98,26 @@ class WebSocketListener:
             callback: async def callback(state: WebSocketState) -> None
         """
         self._external_state_callback = callback
+    
+    def set_trade_callback(self, callback: TradeEventCallback | None) -> None:
+        """체결 이벤트 콜백 설정 (전략 on_trade용)
+        
+        WebSocket에서 체결 발생 시 즉시 호출됩니다.
+        
+        Args:
+            callback: async def callback(trade: TradeEvent) -> bool
+        """
+        self._handler.set_trade_callback(callback)
+    
+    def set_order_callback(self, callback: OrderEventCallback | None) -> None:
+        """주문 이벤트 콜백 설정 (전략 on_order_update용)
+        
+        WebSocket에서 주문 상태 변경 시 즉시 호출됩니다.
+        
+        Args:
+            callback: async def callback(order: OrderEvent) -> bool
+        """
+        self._handler.set_order_callback(callback)
     
     async def start(self) -> None:
         """WebSocket 연결 시작"""

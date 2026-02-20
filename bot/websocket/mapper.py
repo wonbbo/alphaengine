@@ -12,6 +12,7 @@ from typing import Any
 from core.domain.events import Event, EventTypes
 from core.types import Scope
 from core.utils.dedup import make_trade_dedup_key, make_order_dedup_key
+from strategies.base import TradeEvent, OrderEvent
 
 logger = logging.getLogger(__name__)
 
@@ -471,4 +472,97 @@ class WebSocketEventMapper:
             scope=self.scope,
             dedup_key=f"{self.scope.exchange}:ws:reconnected:{ts_ms}",
             payload={"reconnected_at": now.isoformat()},
+        )
+    
+    # -------------------------------------------------------------------------
+    # 전략 콜백용 이벤트 변환
+    # -------------------------------------------------------------------------
+    
+    def create_strategy_trade_event(self, msg: dict[str, Any]) -> TradeEvent | None:
+        """ORDER_TRADE_UPDATE → 전략 콜백용 TradeEvent 변환
+        
+        WebSocket 메시지에서 체결 정보를 추출하여 TradeEvent 생성.
+        체결이 발생하지 않은 경우 None 반환.
+        
+        Args:
+            msg: ORDER_TRADE_UPDATE 메시지
+            
+        Returns:
+            TradeEvent 또는 None (체결 없음)
+        """
+        order_data = msg.get("o", {})
+        if not order_data:
+            return None
+        
+        # 체결 발생 확인
+        execution_type = order_data.get("x", "")
+        last_filled_qty = order_data.get("l", "0")
+        
+        # 체결이 아니거나 체결 수량이 0이면 None
+        if execution_type != "TRADE" or Decimal(last_filled_qty) <= Decimal("0"):
+            return None
+        
+        trade_id = str(order_data.get("t", ""))
+        if not trade_id or trade_id == "0":
+            return None
+        
+        # TradeEvent 생성
+        trade_time = order_data.get("T", 0)
+        
+        return TradeEvent(
+            trade_id=trade_id,
+            order_id=str(order_data.get("i", "")),
+            client_order_id=order_data.get("c", "") or None,
+            symbol=order_data.get("s", ""),
+            side=order_data.get("S", ""),
+            price=Decimal(str(order_data.get("L", "0"))),
+            quantity=Decimal(str(last_filled_qty)),
+            realized_pnl=Decimal(str(order_data.get("rp", "0"))),
+            commission=Decimal(str(order_data.get("n", "0"))),
+            commission_asset=order_data.get("N", ""),
+            timestamp=self._ms_to_datetime(trade_time) if trade_time else datetime.now(timezone.utc),
+        )
+    
+    def create_strategy_order_event(self, msg: dict[str, Any]) -> OrderEvent | None:
+        """ORDER_TRADE_UPDATE → 전략 콜백용 OrderEvent 변환
+        
+        WebSocket 메시지에서 주문 정보를 추출하여 OrderEvent 생성.
+        
+        Args:
+            msg: ORDER_TRADE_UPDATE 메시지
+            
+        Returns:
+            OrderEvent 또는 None
+        """
+        order_data = msg.get("o", {})
+        if not order_data:
+            return None
+        
+        exchange_order_id = str(order_data.get("i", ""))
+        if not exchange_order_id:
+            return None
+        
+        order_time = order_data.get("T", 0)
+        price_str = order_data.get("p", "0")
+        stop_price_str = order_data.get("sp", "0")
+        
+        # 가격 처리 (0이면 None)
+        price = Decimal(str(price_str)) if price_str and Decimal(str(price_str)) > 0 else None
+        stop_price = Decimal(str(stop_price_str)) if stop_price_str and Decimal(str(stop_price_str)) > 0 else None
+        
+        return OrderEvent(
+            order_id=exchange_order_id,
+            client_order_id=order_data.get("c", "") or None,
+            symbol=order_data.get("s", ""),
+            status=order_data.get("X", ""),
+            order_type=order_data.get("o", ""),
+            side=order_data.get("S", ""),
+            price=price,
+            stop_price=stop_price,
+            original_qty=Decimal(str(order_data.get("q", "0"))),
+            executed_qty=Decimal(str(order_data.get("z", "0"))),
+            avg_price=Decimal(str(order_data.get("ap", "0"))),
+            reduce_only=order_data.get("R", False),
+            close_position=order_data.get("cp", False),
+            timestamp=self._ms_to_datetime(order_time) if order_time else datetime.now(timezone.utc),
         )

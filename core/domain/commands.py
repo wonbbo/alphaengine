@@ -235,6 +235,8 @@ class CommandTypes:
     # Transfers
     INTERNAL_TRANSFER: str = "InternalTransfer"
     WITHDRAW: str = "Withdraw"
+    DEPOSIT: str = "Deposit"  # 입금 요청 (Upbit -> Binance)
+    CANCEL_TRANSFER: str = "CancelTransfer"  # 진행 중 이체 취소
 
     @classmethod
     def all_types(cls) -> list[str]:

@@ -17,6 +17,7 @@ from adapters.models import (
     Trade,
     OrderRequest,
 )
+from adapters.slack.notifier import SlackNotifier
 
 __all__ = [
     # Interfaces
@@ -29,4 +30,6 @@ __all__ = [
     "Order",
     "Trade",
     "OrderRequest",
+    # Implementations
+    "SlackNotifier",
 ]

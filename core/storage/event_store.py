@@ -241,6 +241,62 @@ class EventStore:
         
         return [self._row_to_event(row) for row in rows]
     
+    async def get_events_by_type(
+        self,
+        event_type: str,
+        after_ts: int | None = None,
+        limit: int = 1000,
+    ) -> list[Event]:
+        """이벤트 타입별 조회 (시간 필터 지원)
+        
+        Args:
+            event_type: 이벤트 타입 (BalanceChanged, TradeExecuted 등)
+            after_ts: 이 타임스탬프(밀리초) 이후 이벤트만 조회 (None이면 전체)
+            limit: 최대 조회 개수 (기본 1000)
+            
+        Returns:
+            Event 리스트 (ts 순서로 오름차순 정렬)
+        """
+        if after_ts is not None:
+            # 밀리초 타임스탬프를 ISO 문자열로 변환
+            from datetime import datetime, timezone
+            after_dt = datetime.fromtimestamp(after_ts / 1000, tz=timezone.utc)
+            after_ts_str = after_dt.isoformat()
+            
+            rows = await self.db.fetchall(
+                """
+                SELECT 
+                    seq, event_id, event_type, ts,
+                    correlation_id, causation_id, command_id, source,
+                    entity_kind, entity_id,
+                    scope_exchange, scope_venue, scope_account_id, scope_symbol, scope_mode,
+                    dedup_key, payload_json
+                FROM event_store
+                WHERE event_type = ? AND ts >= ?
+                ORDER BY ts ASC
+                LIMIT ?
+                """,
+                (event_type, after_ts_str, limit),
+            )
+        else:
+            rows = await self.db.fetchall(
+                """
+                SELECT 
+                    seq, event_id, event_type, ts,
+                    correlation_id, causation_id, command_id, source,
+                    entity_kind, entity_id,
+                    scope_exchange, scope_venue, scope_account_id, scope_symbol, scope_mode,
+                    dedup_key, payload_json
+                FROM event_store
+                WHERE event_type = ?
+                ORDER BY ts ASC
+                LIMIT ?
+                """,
+                (event_type, limit),
+            )
+        
+        return [self._row_to_event(row) for row in rows]
+    
     async def count_all(self) -> int:
         """전체 이벤트 개수 조회"""
         row = await self.db.fetchone(
