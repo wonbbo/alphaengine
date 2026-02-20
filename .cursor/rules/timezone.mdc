@@ -1,0 +1,217 @@
+---
+description: 타임존 처리 규칙 (내부 UTC, 표시 KST)
+globs: "**/*.py"
+alwaysApply: false
+---
+
+# 타임존 처리 규칙
+
+## 핵심 원칙
+
+**내부 저장: UTC | 외부 표시: KST**
+
+- 모든 datetime 객체는 **UTC**로 저장
+- 로그, UI, 사용자 출력은 **KST**로 변환하여 표시
+- Binance API와 시간 일관성 유지
+
+## 왜 UTC를 사용하는가?
+
+| 이유 | 설명 |
+|------|------|
+| Binance API 호환 | 모든 타임스탬프가 UTC 밀리초로 반환됨 |
+| 서버 시간 독립 | 서버가 KST/UTC 어느 설정이든 동일 동작 |
+| 이벤트 정렬 | 시간순 정렬 시 타임존 혼란 방지 |
+| dedup_key 일관성 | 타임스탬프 기반 중복 제거 정확성 |
+| Reconciler 정합 | WebSocket + REST 이벤트 비교 시 동일 기준 |
+
+## 필수 패턴
+
+### datetime 생성 시
+
+```python
+from datetime import datetime, timezone
+
+# ✅ GOOD - 명시적 UTC
+now = datetime.now(timezone.utc)
+event_ts = datetime.now(timezone.utc)
+
+# ❌ BAD - 시스템 로컬 시간 (tzinfo 없음)
+now = datetime.now()          # tzinfo=None, 서버 설정에 의존
+now = datetime.utcnow()       # UTC지만 tzinfo=None (deprecated)
+```
+
+### 타임스탬프 변환 시
+
+```python
+from datetime import datetime, timezone
+
+# ✅ GOOD - 명시적 UTC 타임존 지정
+dt = datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc)
+
+# ❌ BAD - 타임존 미지정 (로컬 시간으로 해석됨)
+dt = datetime.fromtimestamp(ts_ms / 1000)
+```
+
+### DB 저장 시
+
+```python
+# ✅ GOOD - ISO 8601 UTC 문자열
+ts_str = event.ts.isoformat()  # 2026-02-20T16:00:00+00:00
+
+# ✅ GOOD - UTC 밀리초 타임스탬프
+ts_ms = int(event.ts.timestamp() * 1000)
+```
+
+### DB 로드 시
+
+```python
+from datetime import datetime, timezone
+
+# ✅ GOOD - ISO 8601 문자열에서 datetime 복원
+ts = datetime.fromisoformat(ts_str)
+# fromisoformat은 +00:00 정보를 유지함
+
+# ❌ BAD - 타임존 정보 손실
+ts = datetime.strptime(ts_str, "%Y-%m-%dT%H:%M:%S")
+```
+
+## KST 표시 패턴
+
+### 유틸리티 함수 (core/utils/timezone.py)
+
+```python
+from datetime import datetime, timezone, timedelta
+
+KST = timezone(timedelta(hours=9))
+
+def to_kst(dt: datetime) -> datetime:
+    """UTC datetime을 KST로 변환"""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(KST)
+
+def format_kst(dt: datetime, fmt: str = "%Y-%m-%d %H:%M:%S") -> str:
+    """UTC datetime을 KST 문자열로 포맷"""
+    return to_kst(dt).strftime(fmt)
+```
+
+### 로그 출력 시
+
+```python
+from core.utils.timezone import format_kst
+
+# ✅ GOOD - KST로 변환하여 출력
+logger.info(f"이벤트 생성: {format_kst(event.ts)}")
+# 출력: 이벤트 생성: 2026-02-21 01:00:00
+
+# ❌ BAD - UTC 그대로 출력 (개발자 혼란)
+logger.info(f"이벤트 생성: {event.ts}")
+# 출력: 이벤트 생성: 2026-02-20 16:00:00+00:00
+```
+
+### Web API 응답 시
+
+```python
+from core.utils.timezone import to_kst
+
+# ✅ GOOD - UTC와 KST 모두 제공
+return {
+    "event_id": event.event_id,
+    "ts_utc": event.ts.isoformat(),           # 기계용
+    "ts_kst": to_kst(event.ts).isoformat(),   # 사람용
+}
+```
+
+### 콘솔/터미널 출력 시
+
+```python
+from core.utils.timezone import format_kst
+
+# ✅ GOOD - KST로 읽기 쉽게 출력
+print(f"실행 시간: {format_kst(datetime.now(timezone.utc))}")
+
+# ✅ GOOD - 밀리초까지 필요한 경우
+print(f"체결 시간: {format_kst(trade.trade_time, '%Y-%m-%d %H:%M:%S.%f')[:-3]}")
+```
+
+## 금지 패턴
+
+### 절대 사용 금지
+
+```python
+# ❌ datetime.now() - tzinfo 없음, 서버 설정 의존
+now = datetime.now()
+
+# ❌ datetime.utcnow() - UTC지만 tzinfo 없음 (Python 3.12+에서 deprecated)
+now = datetime.utcnow()
+
+# ❌ fromtimestamp() 타임존 미지정 - 로컬 시간으로 해석
+dt = datetime.fromtimestamp(ts_ms / 1000)
+
+# ❌ strptime() 타임존 미지정 - naive datetime 생성
+dt = datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S")
+
+# ❌ time.time() 직접 사용 (datetime 없이)
+import time
+ts = time.time()  # 부동소수점, 정밀도 문제 가능
+```
+
+### 타임존 혼용 금지
+
+```python
+# ❌ UTC와 KST datetime 직접 비교 (암묵적 변환 위험)
+if kst_datetime > utc_datetime:
+    ...
+
+# ✅ 같은 타임존으로 통일 후 비교
+if to_kst(utc_datetime) > kst_datetime:
+    ...
+```
+
+## 레이어별 타임존 정책
+
+| 레이어 | 저장/처리 | 표시 |
+|--------|----------|------|
+| Event/Command | UTC | - |
+| EventStore (DB) | UTC (ISO 8601) | - |
+| Binance API 통신 | UTC (밀리초) | - |
+| 로그 출력 | - | KST |
+| Web API 응답 | UTC | KST (추가 필드) |
+| 콘솔 출력 | - | KST |
+| 에러 메시지 | - | KST |
+
+## 테스트 코드
+
+```python
+import pytest
+from datetime import datetime, timezone
+
+def test_event_ts_is_utc():
+    """Event의 ts는 반드시 UTC여야 함"""
+    event = Event.create(...)
+    
+    assert event.ts.tzinfo is not None, "tzinfo가 없으면 안됨"
+    assert event.ts.tzinfo == timezone.utc, "UTC가 아니면 안됨"
+
+def test_kst_conversion():
+    """KST 변환 검증"""
+    from core.utils.timezone import to_kst, KST
+    
+    utc_dt = datetime(2026, 2, 20, 16, 0, 0, tzinfo=timezone.utc)
+    kst_dt = to_kst(utc_dt)
+    
+    assert kst_dt.hour == 1  # 다음날 01:00
+    assert kst_dt.day == 21
+    assert kst_dt.tzinfo == KST
+```
+
+## 체크리스트
+
+코드 리뷰 시 확인 사항:
+
+- [ ] `datetime.now()`가 아닌 `datetime.now(timezone.utc)` 사용
+- [ ] `datetime.utcnow()` 사용 금지
+- [ ] `fromtimestamp()`에 `tz=timezone.utc` 지정
+- [ ] DB 저장 시 ISO 8601 형식 (`isoformat()`)
+- [ ] 로그/UI 출력 시 `format_kst()` 또는 `to_kst()` 사용
+- [ ] 타임존이 다른 datetime 간 비교 시 통일

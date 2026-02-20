@@ -125,6 +125,25 @@ client_order_id = f"ae-{command_id}"
 - **Venue**: FUTURES
 - **Exchange**: BINANCE
 
+## 타임존 규칙 (ADR-010)
+
+**내부 저장: UTC | 외부 표시: KST**
+
+```python
+from datetime import datetime, timezone
+
+# ✅ GOOD - 명시적 UTC
+now = datetime.now(timezone.utc)
+
+# ❌ BAD - 서버 시간 의존
+now = datetime.now()      # tzinfo 없음
+now = datetime.utcnow()   # deprecated
+```
+
+- 모든 Event/Command의 ts 필드는 UTC 저장
+- 로그, UI 출력 시 KST 변환: `format_kst(event.ts)`
+- 상세 규칙: `timezone.mdc` 참조
+
 ## 크로스 플랫폼 (Windows 개발 → Linux 운영)
 
 | 환경 | OS | 용도 |

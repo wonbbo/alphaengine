@@ -6,7 +6,7 @@ REST 연결, WebSocket 연결, WebSocket 재연결 시나리오 검증.
 
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 
 import pytest
@@ -43,8 +43,8 @@ class TestRESTConnection:
         e2e_logger.info("서버 시간 조회 중...")
         server_time = await rest_client.get_server_time()
         
-        # 검증: 타임스탬프가 합리적인 범위인지
-        now_ms = int(datetime.now().timestamp() * 1000)
+        # 검증: 타임스탬프가 합리적인 범위인지 (UTC 기준)
+        now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
         time_diff = abs(server_time - now_ms)
         
         e2e_logger.info(f"서버 시간: {server_time}, 로컬 시간: {now_ms}, 차이: {time_diff}ms")

@@ -337,6 +337,26 @@ async def init_schema(adapter: SQLiteAdapter) -> None:
         )
     """)
     
+    # projection_balance (현재 잔고 Projection)
+    await adapter.execute("""
+        CREATE TABLE IF NOT EXISTS projection_balance (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            scope_exchange   TEXT NOT NULL,
+            scope_venue      TEXT NOT NULL,
+            scope_account_id TEXT NOT NULL,
+            scope_mode       TEXT NOT NULL DEFAULT 'TESTNET',
+            
+            asset            TEXT NOT NULL,
+            free             TEXT NOT NULL DEFAULT '0',
+            locked           TEXT NOT NULL DEFAULT '0',
+            
+            last_event_seq   INTEGER NOT NULL,
+            updated_at       TEXT NOT NULL DEFAULT (datetime('now')),
+            
+            UNIQUE(scope_exchange, scope_venue, scope_account_id, asset, scope_mode)
+        )
+    """)
+    
     # 인덱스 생성
     await adapter.execute("""
         CREATE INDEX IF NOT EXISTS ix_event_store_ts 

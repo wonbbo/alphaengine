@@ -7,16 +7,23 @@ E2E 테스트 로깅 유틸리티
 import json
 import logging
 import sys
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any
 
+# KST 타임존 (로그 출력용)
+KST = timezone(timedelta(hours=9))
+
 
 class E2EFormatter(logging.Formatter):
-    """E2E 테스트용 로그 포맷터"""
+    """E2E 테스트용 로그 포맷터
+    
+    로그 출력은 KST로 표시 (내부 UTC, 표시 KST 원칙)
+    """
     
     def format(self, record: logging.LogRecord) -> str:
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        # KST로 변환하여 출력
+        timestamp = datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S")
         level = record.levelname.ljust(5)
         return f"[{timestamp}] {level} {record.getMessage()}"
 
@@ -66,8 +73,9 @@ class E2EResultRecorder:
     """
     
     def __init__(self, run_id: str | None = None) -> None:
-        self.run_id = run_id or datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        self.start_time = datetime.now()
+        # KST로 표시 (사용자 친화적)
+        self.run_id = run_id or datetime.now(KST).strftime("%Y-%m-%d_%H-%M-%S")
+        self.start_time = datetime.now(timezone.utc)  # 내부 계산은 UTC
         self.results: dict[str, list[dict[str, Any]]] = {}
         self.failures: list[dict[str, Any]] = []
     
@@ -130,7 +138,7 @@ class E2EResultRecorder:
             passed += scenario_passed
             failed += scenario_failed
         
-        duration = (datetime.now() - self.start_time).total_seconds()
+        duration = (datetime.now(timezone.utc) - self.start_time).total_seconds()
         
         return {
             "run_id": self.run_id,
@@ -178,7 +186,8 @@ def create_run_directory(base_dir: Path) -> Path:
     Returns:
         생성된 디렉토리 경로
     """
-    run_id = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    # KST로 표시 (사용자 친화적 디렉토리명)
+    run_id = datetime.now(KST).strftime("%Y-%m-%d_%H-%M-%S")
     run_dir = base_dir / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
     

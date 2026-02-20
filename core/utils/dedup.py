@@ -349,3 +349,27 @@ def make_engine_event_dedup_key(
         'engine:started:1708408800000'
     """
     return f"engine:{event_type}:{ts_ms}"
+
+
+def generate_balance_dedup_key(
+    exchange: str,
+    venue: str,
+    asset: str,
+    update_time: int,
+) -> str:
+    """BalanceChanged용 dedup_key 생성 (시간 기반)
+
+    Args:
+        exchange: 거래소
+        venue: 거래 장소
+        asset: 자산 (예: USDT)
+        update_time: 업데이트 시간 (밀리초)
+
+    Returns:
+        dedup_key: {exchange}:{venue}:{asset}:balance:{update_time}
+
+    Example:
+        >>> generate_balance_dedup_key("BINANCE", "FUTURES", "USDT", 1708408800000)
+        'BINANCE:FUTURES:USDT:balance:1708408800000'
+    """
+    return f"{exchange}:{venue}:{asset}:balance:{update_time}"
