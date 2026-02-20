@@ -106,7 +106,7 @@ class TestOrderStatus:
         assert OrderStatus.NEW.value == "NEW"
         assert OrderStatus.PARTIALLY_FILLED.value == "PARTIALLY_FILLED"
         assert OrderStatus.FILLED.value == "FILLED"
-        assert OrderStatus.CANCELLED.value == "CANCELLED"
+        assert OrderStatus.CANCELED.value == "CANCELED"
         assert OrderStatus.REJECTED.value == "REJECTED"
         assert OrderStatus.EXPIRED.value == "EXPIRED"
 

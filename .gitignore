@@ -66,6 +66,10 @@ htmlcov/
 .tox/
 .nox/
 
+# E2E 테스트 결과
+tests/e2e/results/
+!tests/e2e/results/.gitkeep
+
 # mypy
 .mypy_cache/
 .dmypy.json

@@ -132,6 +132,28 @@ client_order_id = f"ae-{command_id}"
 | 개발 | Windows | 코드 작성, 로컬 테스트 |
 | 운영 | Linux (Ubuntu) | 24/7 Bot + Web 실행 |
 
+## 명령 실행 규칙
+
+**venv 활성화 필수**: `.venv` 폴더가 존재하면 반드시 가상환경을 활성화한 후 모든 Python 관련 명령 실행
+
+```bash
+# Windows
+.venv\Scripts\activate
+
+# Linux/Mac
+source .venv/bin/activate
+```
+
+또는 직접 venv의 Python 실행파일 사용:
+
+```bash
+# Windows
+.venv\Scripts\python.exe -m pytest ...
+
+# Linux/Mac
+.venv/bin/python -m pytest ...
+```
+
 **필수 규칙**:
 
 ```python

@@ -332,7 +332,7 @@ class MockExchangeRestClient:
             symbol=target_order.symbol,
             side=target_order.side,
             order_type=target_order.order_type,
-            status=OrderStatus.CANCELLED.value,
+            status=OrderStatus.CANCELED.value,
             original_qty=target_order.original_qty,
             executed_qty=target_order.executed_qty,
             price=target_order.price,

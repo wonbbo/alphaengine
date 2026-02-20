@@ -61,7 +61,7 @@ class OrderStatus(str, Enum):
     NEW = "NEW"
     PARTIALLY_FILLED = "PARTIALLY_FILLED"
     FILLED = "FILLED"
-    CANCELLED = "CANCELLED"
+    CANCELED = "CANCELED"  # Binance API 사용 (미국식 철자)
     REJECTED = "REJECTED"
     EXPIRED = "EXPIRED"
 

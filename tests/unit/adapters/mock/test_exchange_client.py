@@ -192,7 +192,7 @@ class TestMockExchangeRestClient:
         
         cancelled = await client.cancel_order("XRPUSDT", order_id=order.order_id)
         
-        assert cancelled.status == OrderStatus.CANCELLED.value
+        assert cancelled.status == OrderStatus.CANCELED.value
     
     @pytest.mark.asyncio
     async def test_cancel_order_by_client_order_id(self, client: MockExchangeRestClient) -> None:
@@ -211,7 +211,7 @@ class TestMockExchangeRestClient:
             client_order_id="ae-test-cancel",
         )
         
-        assert cancelled.status == OrderStatus.CANCELLED.value
+        assert cancelled.status == OrderStatus.CANCELED.value
     
     @pytest.mark.asyncio
     async def test_cancel_order_not_found(self, client: MockExchangeRestClient) -> None:

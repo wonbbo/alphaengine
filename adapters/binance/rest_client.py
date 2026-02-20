@@ -65,6 +65,10 @@ class BinanceRestClient:
         self.rate_tracker = RateLimitTracker()
         self._client: httpx.AsyncClient | None = None
         self._listen_key: str | None = None
+        
+        # 서버 시간 동기화용 오프셋 (밀리초)
+        self._time_offset: int = 0
+        self._time_synced: bool = False
     
     async def _get_client(self) -> httpx.AsyncClient:
         """HTTP 클라이언트 가져오기 (lazy initialization)"""
@@ -92,6 +96,35 @@ class BinanceRestClient:
             query_string.encode("utf-8"),
             hashlib.sha256,
         ).hexdigest()
+    
+    def _get_timestamp(self) -> int:
+        """서버 시간 오프셋이 적용된 타임스탬프 반환 (밀리초)"""
+        return int(time.time() * 1000) + self._time_offset
+    
+    async def sync_time(self) -> int:
+        """서버 시간과 동기화
+        
+        로컬 시간과 서버 시간의 차이를 계산하여 오프셋 저장.
+        
+        Returns:
+            계산된 시간 오프셋 (밀리초)
+        """
+        local_time = int(time.time() * 1000)
+        server_time = await self.get_server_time()
+        self._time_offset = server_time - local_time
+        self._time_synced = True
+        
+        logger.info(
+            "서버 시간 동기화 완료",
+            extra={"offset_ms": self._time_offset},
+        )
+        
+        return self._time_offset
+    
+    async def _ensure_time_synced(self) -> None:
+        """시간 동기화가 필요하면 수행"""
+        if not self._time_synced:
+            await self.sync_time()
     
     async def _request(
         self,
@@ -126,27 +159,33 @@ class BinanceRestClient:
                 message="Request weight threshold reached",
             )
         
-        params = params or {}
+        # 원본 params 보존 (재시도 시 재사용)
+        original_params = dict(params) if params else {}
         headers = {"X-MBX-APIKEY": self.api_key}
-        
-        # 서명이 필요한 경우
-        if signed:
-            params["timestamp"] = int(time.time() * 1000)
-            params["recvWindow"] = 5000
-            query_string = urlencode(params)
-            signature = self._generate_signature(query_string)
-            params["signature"] = signature
-        
         url = f"{self.base_url}{path}"
         client = await self._get_client()
         
         # 재시도 로직
         for attempt in range(self.max_retries):
+            # 매 시도마다 params 새로 생성 (타임스탬프 갱신)
+            request_params = dict(original_params)
+            
+            # 서명이 필요한 경우
+            if signed:
+                # 시간 동기화 확인
+                if not self._time_synced:
+                    await self._ensure_time_synced()
+                
+                request_params["timestamp"] = self._get_timestamp()
+                request_params["recvWindow"] = 5000
+                query_string = urlencode(request_params)
+                signature = self._generate_signature(query_string)
+                request_params["signature"] = signature
             try:
                 response = await client.request(
                     method,
                     url,
-                    params=params,
+                    params=request_params,
                     headers=headers,
                 )
                 
@@ -176,6 +215,15 @@ class BinanceRestClient:
                     except Exception:
                         code = response.status_code
                         message = response.text
+                    
+                    # 타임스탬프 오류 시 시간 재동기화 후 재시도
+                    if code in (-1021, -1022) and attempt < self.max_retries - 1:
+                        logger.warning(
+                            "타임스탬프 오류, 시간 재동기화",
+                            extra={"code": code, "attempt": attempt + 1},
+                        )
+                        await self.sync_time()
+                        continue
                     
                     raise BinanceApiError(code=code, message=message)
                 

@@ -138,7 +138,7 @@ class Order:
     @property
     def is_cancelled(self) -> bool:
         """취소 여부"""
-        return self.status == OrderStatus.CANCELLED.value
+        return self.status == OrderStatus.CANCELED.value
 
 
 @dataclass(frozen=True)

@@ -158,6 +158,23 @@ Dev-Phase 2 (Testnet E2E 시나리오 검증)를 시작한다.
 5. 결과 기록 방법
 ```
 
+```bash
+# pytest-asyncio 설치 필요
+pip install pytest-asyncio
+
+# 전체 E2E 테스트 실행
+pytest tests/e2e -v -m e2e
+
+# 특정 시나리오만 실행
+pytest tests/e2e/scenarios/test_01_connection.py -v
+
+# 느린 테스트 제외
+pytest tests/e2e -v -m "e2e and not slow"
+
+# 결과 로그 저장
+pytest tests/e2e -v --e2e-log-dir=tests/e2e/results
+```
+
 ## 완료 체크리스트
 - [ ] Testnet에서 모든 시나리오 성공
 - [ ] 시나리오별 로그/결과 문서화
