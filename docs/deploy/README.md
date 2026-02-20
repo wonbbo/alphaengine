@@ -13,12 +13,20 @@
 
 | 문서 | 상태 | 설명 |
 |------|------|------|
-| [setup.md](setup.md) | 미작성 | 서버 초기 설정 (의존성, 사용자, 디렉토리) |
-| [systemd.md](systemd.md) | 미작성 | systemd 서비스 설정 (Bot, Web) |
-| [nginx.md](nginx.md) | 미작성 | nginx 리버스 프록시 설정 |
-| [backup.md](backup.md) | 미작성 | DB 백업/복구 절차 |
-| [monitoring.md](monitoring.md) | 미작성 | 로그, 모니터링, 알림 설정 |
-| [troubleshooting.md](troubleshooting.md) | 미작성 | 운영 중 문제 해결 가이드 |
+| [setup.md](setup.md) | ✅ 완료 | 서버 초기 설정 (의존성, 사용자, 디렉토리) |
+| [systemd.md](systemd.md) | ✅ 완료 | systemd 서비스 설정 (Bot, Web) |
+| [nginx.md](nginx.md) | ✅ 완료 | nginx 리버스 프록시 설정 |
+| [backup.md](backup.md) | ✅ 완료 | DB 백업/복구 절차 |
+| [monitoring.md](monitoring.md) | ✅ 완료 | 로그, 모니터링, 알림 설정 |
+| [troubleshooting.md](troubleshooting.md) | ✅ 완료 | 운영 중 문제 해결 가이드 |
+| [production_checklist.md](production_checklist.md) | ✅ 완료 | Production 전환 체크리스트 |
+
+## systemd 서비스 파일
+
+| 파일 | 설명 |
+|------|------|
+| [alphaengine-bot.service](../../deploy/systemd/alphaengine-bot.service) | Bot 프로세스 관리 |
+| [alphaengine-web.service](../../deploy/systemd/alphaengine-web.service) | Web 프로세스 관리 |
 
 ## 퀵 스타트 (요약)
 

@@ -7,8 +7,9 @@ FastAPI 애플리케이션
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
-from web.routes import health
+from web.routes import health, dashboard, events, commands, config
 
 
 @asynccontextmanager
@@ -28,5 +29,18 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# CORS 설정 (개발용)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 # 라우터 등록
 app.include_router(health.router)
+app.include_router(dashboard.router)
+app.include_router(events.router)
+app.include_router(commands.router)
+app.include_router(config.router)

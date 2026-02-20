@@ -1,0 +1,42 @@
+[Unit]
+Description=AlphaEngine Web - API Server
+Documentation=https://github.com/yourusername/alphaengine
+After=network.target alphaengine-bot.service
+Wants=alphaengine-bot.service
+
+[Service]
+Type=simple
+User=alphaengine
+Group=alphaengine
+WorkingDirectory=/opt/alphaengine
+
+# 환경 변수
+Environment=PYTHONUNBUFFERED=1
+
+# 실행 명령 (uvicorn)
+ExecStart=/opt/alphaengine/venv/bin/uvicorn web.app:app --host 127.0.0.1 --port 8000 --workers 1
+
+# 재시작 정책
+Restart=always
+RestartSec=5
+StartLimitBurst=5
+StartLimitInterval=60
+
+# 로그
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=alphaengine-web
+
+# 보안 설정
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/opt/alphaengine/data /opt/alphaengine/logs
+
+# 리소스 제한
+MemoryMax=256M
+CPUQuota=50%
+
+[Install]
+WantedBy=multi-user.target

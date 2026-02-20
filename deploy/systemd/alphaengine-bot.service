@@ -1,0 +1,42 @@
+[Unit]
+Description=AlphaEngine Bot - Binance Futures Trading Bot
+Documentation=https://github.com/yourusername/alphaengine
+After=network.target network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=alphaengine
+Group=alphaengine
+WorkingDirectory=/opt/alphaengine
+
+# 환경 변수
+Environment=PYTHONUNBUFFERED=1
+
+# 실행 명령
+ExecStart=/opt/alphaengine/venv/bin/python -m bot
+
+# 재시작 정책
+Restart=always
+RestartSec=5
+StartLimitBurst=5
+StartLimitInterval=60
+
+# 로그
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=alphaengine-bot
+
+# 보안 설정
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/opt/alphaengine/data /opt/alphaengine/logs
+
+# 리소스 제한
+MemoryMax=512M
+CPUQuota=100%
+
+[Install]
+WantedBy=multi-user.target
