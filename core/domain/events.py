@@ -183,6 +183,12 @@ class EventTypes:
     RECONCILIATION_PERFORMED: str = "ReconciliationPerformed"
     QUARANTINE_STARTED: str = "QuarantineStarted"
     QUARANTINE_COMPLETED: str = "QuarantineCompleted"
+    
+    # Strategy
+    STRATEGY_LOADED: str = "StrategyLoaded"
+    STRATEGY_STARTED: str = "StrategyStarted"
+    STRATEGY_STOPPED: str = "StrategyStopped"
+    STRATEGY_ERROR: str = "StrategyError"
 
     @classmethod
     def all_types(cls) -> list[str]:

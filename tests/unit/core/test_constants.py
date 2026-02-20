@@ -45,11 +45,11 @@ class TestBinanceEndpoints:
 
     def test_testnet_rest_url(self) -> None:
         """Testnet REST URL 확인"""
-        assert BinanceEndpoints.TEST_REST_URL == "https://testnet.binancefuture.com"
+        assert BinanceEndpoints.TEST_REST_URL == "https://demo-fapi.binance.com"
 
     def test_testnet_ws_url(self) -> None:
         """Testnet WebSocket URL 확인"""
-        assert BinanceEndpoints.TEST_WS_URL == "wss://stream.binancefuture.com"
+        assert BinanceEndpoints.TEST_WS_URL == "wss://fstream.binancefuture.com"
 
     def test_urls_are_strings(self) -> None:
         """모든 URL이 문자열인지 확인"""

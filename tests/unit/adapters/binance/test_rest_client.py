@@ -126,6 +126,8 @@ class TestBinanceRestClientBalances:
             api_key="test_key",
             api_secret="test_secret",
         )
+        # 시간 동기화 건너뛰기 (테스트용)
+        client._time_synced = True
         
         mock_response = MagicMock()
         mock_response.status_code = 200
@@ -151,6 +153,8 @@ class TestBinanceRestClientBalances:
             api_key="test_key",
             api_secret="test_secret",
         )
+        # 시간 동기화 건너뛰기 (테스트용)
+        client._time_synced = True
         
         mock_response = MagicMock()
         mock_response.status_code = 200
@@ -186,6 +190,8 @@ class TestBinanceRestClientOrders:
             api_key="test_key",
             api_secret="test_secret",
         )
+        # 시간 동기화 건너뛰기 (테스트용)
+        client._time_synced = True
         
         mock_response = MagicMock()
         mock_response.status_code = 200

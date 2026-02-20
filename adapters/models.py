@@ -35,6 +35,16 @@ class Balance:
     def total(self) -> Decimal:
         """총 잔고 (지갑 + 미실현 손익)"""
         return self.wallet_balance + self.unrealized_pnl
+    
+    @property
+    def free(self) -> Decimal:
+        """사용 가능 잔고 (alias)"""
+        return self.available_balance
+    
+    @property
+    def locked(self) -> Decimal:
+        """잠긴 잔고"""
+        return self.wallet_balance - self.available_balance
 
 
 @dataclass(frozen=True)
@@ -62,6 +72,11 @@ class Position:
     margin_type: str = "CROSS"
     liquidation_price: Decimal | None = None
     mark_price: Decimal | None = None
+    
+    @property
+    def qty(self) -> Decimal:
+        """포지션 수량 (alias)"""
+        return self.quantity
     
     @property
     def is_long(self) -> bool:
@@ -158,7 +173,7 @@ class Trade:
         commission_asset: 수수료 자산
         realized_pnl: 실현 손익
         is_maker: 메이커 여부
-        trade_time: 체결 시간
+        trade_time: 체결 시간 (밀리초 타임스탬프 또는 datetime)
     """
     
     trade_id: str
@@ -173,7 +188,12 @@ class Trade:
     commission_asset: str = "USDT"
     realized_pnl: Decimal = Decimal("0")
     is_maker: bool = False
-    trade_time: datetime | None = None
+    trade_time: int | datetime | None = None  # 밀리초 타임스탬프 또는 datetime
+    
+    @property
+    def qty(self) -> Decimal:
+        """체결 수량 (alias)"""
+        return self.quantity
 
 
 @dataclass
