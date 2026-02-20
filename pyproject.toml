@@ -3,10 +3,13 @@ name = "alphaengine"
 version = "2.0.0"
 description = "Hybrid Trading Engine with Bot/Web Architecture for Binance Futures"
 requires-python = ">=3.11"
-readme = "README.md"
 
 dependencies = [
     "pyyaml>=6.0",
+    "aiosqlite>=0.19",
+    "fastapi>=0.109",
+    "uvicorn[standard]>=0.27",
+    "pydantic>=2.0",
 ]
 
 [project.optional-dependencies]
