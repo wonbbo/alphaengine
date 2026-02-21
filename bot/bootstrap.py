@@ -94,8 +94,8 @@ class BotEngine:
         self.upbit_client: UpbitRestClient | None = None
         self.bnb_fee_manager: BnbFeeManager | None = None
         
-        # 전략 설정 (secrets.yaml 또는 config에서 로드)
-        self.strategy_config = self._load_strategy_config()
+        # 전략 설정 (런타임에 config_store에서 로드)
+        self.strategy_config: dict[str, Any] = {}
         
         # 설정
         self.target_symbol = settings.target_symbol if hasattr(settings, 'target_symbol') else "XRPUSDT"
@@ -139,19 +139,29 @@ class BotEngine:
             api_secret=self.settings.api_secret,
         )
     
-    def _load_strategy_config(self) -> dict[str, Any]:
-        """전략 설정 로드 (secrets.yaml의 strategy 섹션)"""
-        import yaml
+    async def _load_strategy_config_from_store(self) -> dict[str, Any]:
+        """전략 설정 로드 (config_store 우선)
         
-        try:
-            if Paths.SECRETS_FILE.exists():
-                with open(Paths.SECRETS_FILE, encoding="utf-8") as f:
-                    data = yaml.safe_load(f)
-                    return data.get("strategy", {})
-        except Exception as e:
-            logger.warning(f"전략 설정 로드 실패: {e}")
+        Returns:
+            전략 설정 딕셔너리:
+            - module: 전략 모듈 경로
+            - class: 전략 클래스명
+            - params: 전략 파라미터
+            - auto_start: 자동 시작 여부
+        """
+        if not self.config_store:
+            logger.warning("ConfigStore가 없어 빈 전략 설정 반환")
+            return {
+                "name": None,
+                "module": None,
+                "class": None,
+                "params": {},
+                "auto_start": False,
+            }
         
-        return {}
+        strategy_config = await self.config_store.get("strategy")
+        logger.info(f"전략 설정 로드: {strategy_config}")
+        return strategy_config
     
     def _create_notifier(self) -> SlackNotifier | None:
         """Slack Notifier 생성 (설정이 있는 경우에만)"""
@@ -470,33 +480,57 @@ class BotEngine:
     async def _load_and_start_strategy(self) -> None:
         """전략 자동 로드 및 시작
         
-        secrets.yaml의 strategy 섹션에서 설정을 읽어 전략을 로드.
-        설정이 없으면 기본 전략(SmaCrossStrategy) 로드.
+        config_store의 strategy 섹션에서 설정을 읽어 전략을 로드.
         
-        secrets.yaml 예시:
-        ```yaml
-        strategy:
-          module: strategies.examples.sma_cross
-          class: SmaCrossStrategy
-          params:
-            fast_period: 5
-            slow_period: 20
-            quantity: "10"
+        전략 운용 조건:
+        - name, module, class 필드가 모두 존재하고 유효한 값이어야 함
+        - auto_start가 True여야 자동 시작 (False면 로드만)
+        - 조건 미충족 시 전략 로드 건너뜀
+        
+        config_store strategy 예시:
+        ```json
+        {
+            "name": "SMA Cross",
+            "module": "strategies.examples.sma_cross",
+            "class": "SmaCrossStrategy",
+            "params": {"fast_period": 5, "slow_period": 20},
+            "auto_start": true
+        }
         ```
         """
         if not self.strategy_runner:
             logger.warning("StrategyRunner가 없어 전략 로드 건너뜀")
             return
         
-        # 설정에서 전략 정보 로드
-        module_path = self.strategy_config.get("module", "strategies.examples.sma_cross")
-        class_name = self.strategy_config.get("class", "SmaCrossStrategy")
+        # config_store에서 전략 설정 로드
+        self.strategy_config = await self._load_strategy_config_from_store()
+        
+        # 필수 필드 확인 (None, 빈 문자열, 미존재 모두 체크)
+        strategy_name = self.strategy_config.get("name")
+        module_path = self.strategy_config.get("module")
+        class_name = self.strategy_config.get("class")
+        
+        # name, module, class 중 하나라도 없거나 null이면 전략 로드 안 함
+        if not strategy_name or not module_path or not class_name:
+            missing_fields = []
+            if not strategy_name:
+                missing_fields.append("name")
+            if not module_path:
+                missing_fields.append("module")
+            if not class_name:
+                missing_fields.append("class")
+            
+            logger.info(
+                f"전략 설정 미완료로 전략 로드 건너뜀 "
+                f"(미설정 필드: {', '.join(missing_fields)})"
+            )
+            return
+        
+        # auto_start 확인 (기본값: False)
+        auto_start = self.strategy_config.get("auto_start", False)
         params = self.strategy_config.get("params", {})
         
-        # 전략 자동 시작 여부 (기본: True)
-        auto_start = self.strategy_config.get("auto_start", True)
-        
-        logger.info(f"전략 로드 시도: {module_path}.{class_name}")
+        logger.info(f"전략 로드 시도: {strategy_name} ({module_path}.{class_name})")
         
         # 전략 로드
         success = await self.strategy_runner.load_strategy(
@@ -506,24 +540,26 @@ class BotEngine:
         )
         
         if not success:
-            logger.error(f"전략 로드 실패: {module_path}.{class_name}")
+            logger.error(f"전략 로드 실패: {strategy_name} ({module_path}.{class_name})")
             await self._send_notification(
-                f"전략 로드 실패: {module_path}.{class_name}",
+                f"전략 로드 실패: {strategy_name}",
                 level="ERROR",
             )
             return
         
-        logger.info(f"전략 로드 성공: {module_path}.{class_name}")
+        logger.info(f"전략 로드 성공: {strategy_name}")
         
-        # 자동 시작
+        # auto_start가 True일 때만 자동 시작
         if auto_start:
             await self.strategy_runner.start()
-            logger.info(f"전략 시작됨: {class_name}")
+            logger.info(f"전략 시작됨: {strategy_name}")
             
             await self._send_notification(
-                f"전략 시작됨: {class_name} (params: {params})",
+                f"전략 시작됨: {strategy_name} (params: {params})",
                 level="INFO",
             )
+        else:
+            logger.info(f"전략 로드됨 (auto_start=False로 대기 상태): {strategy_name}")
     
     async def start(self) -> None:
         """엔진 시작"""

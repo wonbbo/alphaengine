@@ -30,8 +30,11 @@ const DEFAULT_CONFIGS = {
         "equity_reset_trades": { default: 50, desc: "자산 재평가 주기 (거래 수)" },
     },
     "strategy": {
-        "name": { default: null, desc: "전략 이름" },
+        "name": { default: null, desc: "전략 이름 (필수)" },
+        "module": { default: null, desc: "전략 모듈 경로 (필수)" },
+        "class": { default: null, desc: "전략 클래스명 (필수)" },
         "params": { default: {}, desc: "전략 파라미터 (JSON)" },
+        "auto_start": { default: false, desc: "봇 시작 시 자동 시작" },
     },
     "strategy_state": {
         "account_equity": { default: "0", desc: "기준 자산 (읽기 전용)" },

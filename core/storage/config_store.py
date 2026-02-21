@@ -33,39 +33,42 @@ DEFAULT_CONFIGS: dict[str, dict[str, Any]] = {
         "daily_loss_limit": "0",
         "max_open_orders": 0,
         "min_balance": "0",
-        
         # 전략 공통 리스크/리워드 설정 (손절 방식과 무관)
-        "risk_per_trade": "0.02",         # 거래당 리스크 비율 (2%)
-        "reward_ratio": "1.5",            # R:R = 1:1.5
-        "partial_tp_ratio": "0.5",        # 부분 익절 비율 (50%)
-        "equity_reset_trades": 50,        # 자산 재평가 주기 (거래 수)
+        "risk_per_trade": "0.02",  # 거래당 리스크 비율 (2%)
+        "reward_ratio": "1.5",  # R:R = 1:1.5
+        "partial_tp_ratio": "0.5",  # 부분 익절 비율 (50%)
+        "equity_reset_trades": 50,  # 자산 재평가 주기 (거래 수)
         # 주의: atr_multiplier 등 손절 방식별 파라미터는 전략 params에서 관리
     },
     "strategy": {
-        "name": None,
-        "params": {},
+        # 전략 설정 (secrets.yaml 대신 config_store에서 관리)
+        "name": None,  # 전략 이름
+        "module": None,  # 전략 모듈 경로
+        "class": None,  # 전략 클래스명
+        "params": {},  # 전략 파라미터
+        "auto_start": False,  # 봇 시작 시 자동 시작
     },
     "strategy_state": {
         # Bot 재시작 시에도 유지되어야 하는 전략 상태
-        "account_equity": "0",            # 50거래 재평가용 기준 자산
-        "trade_count_since_reset": 0,     # 마지막 재평가 이후 거래 수
-        "total_trade_count": 0,           # 총 거래 수
+        "account_equity": "0",  # 50거래 재평가용 기준 자산
+        "trade_count_since_reset": 0,  # 마지막 재평가 이후 거래 수
+        "total_trade_count": 0,  # 총 거래 수
     },
     "transfer": {
         # 이체 관련 설정
-        "min_deposit_krw": 5000,          # 최소 입금 금액 (KRW)
-        "min_withdraw_usdt": 10,          # 최소 출금 금액 (USDT)
-        "trx_fee": 1,                     # TRX 출금 수수료
-        "daily_withdraw_limit_usdt": 0,   # 일일 출금 한도 (0 = 무제한)
-        "krw_deposit_hold_hours": 24,     # KRW 입금 후 대기 시간 (시간)
+        "min_deposit_krw": 5000,  # 최소 입금 금액 (KRW)
+        "min_withdraw_usdt": 10,  # 최소 출금 금액 (USDT)
+        "trx_fee": 1,  # TRX 출금 수수료
+        "daily_withdraw_limit_usdt": 0,  # 일일 출금 한도 (0 = 무제한)
+        "krw_deposit_hold_hours": 24,  # KRW 입금 후 대기 시간 (시간)
     },
     "bnb_fee": {
         # BNB 수수료 할인을 위한 자동 충전 설정
-        "enabled": True,                  # 자동 충전 활성화
-        "min_bnb_ratio": "0.01",          # 최소 BNB 비율 (총 자산의 1%)
-        "target_bnb_ratio": "0.02",       # 충전 목표 비율 (2%)
-        "min_trigger_usdt": "10",         # 최소 트리거 금액 (USDT 환산)
-        "check_interval_sec": 3600,       # 체크 주기 (1시간)
+        "enabled": True,  # 자동 충전 활성화
+        "min_bnb_ratio": "0.01",  # 최소 BNB 비율 (총 자산의 1%)
+        "target_bnb_ratio": "0.02",  # 충전 목표 비율 (2%)
+        "min_trigger_usdt": "10",  # 최소 트리거 금액 (USDT 환산)
+        "check_interval_sec": 3600,  # 체크 주기 (1시간)
     },
 }
 
