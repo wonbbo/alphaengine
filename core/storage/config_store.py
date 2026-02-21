@@ -207,7 +207,9 @@ class ConfigStore:
             self._cache.pop(key, None)
             self._cache_version.pop(key, None)
             
-            logger.info(f"Config '{key}' updated by {updated_by}")
+            # heartbeat 로그는 너무 자주 발생하므로 표시하지 않음
+            if updated_by != "bot:heartbeat":
+                logger.info(f"Config '{key}' updated by {updated_by}")
             return True
             
         except Exception as e:
