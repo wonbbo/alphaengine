@@ -11,10 +11,38 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from web.dependencies import get_db, get_transfer_manager
+from web.dependencies import get_db, get_transfer_manager, is_transfer_available
 from web.services.transfer_service import TransferService, TransferResponse
 
 logger = logging.getLogger(__name__)
+
+
+# =========================================================================
+# 입출금 기능 가용성 체크
+# =========================================================================
+
+
+class TransferUnavailableResponse(BaseModel):
+    """입출금 기능 비활성화 응답"""
+    
+    available: bool = False
+    reason: str
+
+
+def check_transfer_available():
+    """입출금 기능 사용 가능 여부 체크
+    
+    Raises:
+        HTTPException: 입출금 기능 비활성화 시 503 반환
+    """
+    if not is_transfer_available():
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "available": False,
+                "reason": "입출금 기능이 비활성화되어 있습니다. (Testnet 모드)",
+            },
+        )
 
 router = APIRouter(prefix="/api/transfer", tags=["Transfer"])
 
@@ -104,6 +132,8 @@ async def get_deposit_status(
     Returns:
         입금 상태 정보
     """
+    check_transfer_available()
+    
     try:
         status = await transfer_manager.get_deposit_status()
         return status
@@ -127,6 +157,8 @@ async def request_deposit(
     Returns:
         생성된 이체 정보
     """
+    check_transfer_available()
+    
     try:
         amount = Decimal(request.amount_krw)
         
@@ -166,6 +198,8 @@ async def get_withdraw_status(
     Returns:
         출금 상태 정보
     """
+    check_transfer_available()
+    
     try:
         status = await transfer_manager.get_withdraw_status()
         return status
@@ -189,6 +223,8 @@ async def request_withdraw(
     Returns:
         생성된 이체 정보
     """
+    check_transfer_available()
+    
     try:
         amount = Decimal(request.amount_usdt)
         
@@ -310,6 +346,8 @@ async def cancel_transfer(
     Returns:
         업데이트된 이체 정보
     """
+    check_transfer_available()
+    
     try:
         transfer = await transfer_manager.cancel_transfer(transfer_id)
         return TransferResponse.from_transfer(transfer).to_dict()
@@ -336,6 +374,8 @@ async def retry_transfer(
     Returns:
         업데이트된 이체 정보
     """
+    check_transfer_available()
+    
     try:
         transfer = await transfer_manager.retry_transfer(transfer_id)
         return TransferResponse.from_transfer(transfer).to_dict()

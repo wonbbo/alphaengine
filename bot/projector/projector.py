@@ -5,9 +5,11 @@ Event Stream을 읽어 Projection 테이블 업데이트.
 Checkpoint 기반으로 마지막 처리 위치 기억.
 """
 
+from __future__ import annotations
+
 import logging
 from datetime import datetime, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from adapters.db.sqlite_adapter import SQLiteAdapter
 from core.domain.events import Event
@@ -16,6 +18,20 @@ from bot.projector.handlers.base import ProjectionHandler
 from bot.projector.handlers.balance import BalanceProjectionHandler
 from bot.projector.handlers.position import PositionProjectionHandler
 from bot.projector.handlers.order import OrderProjectionHandler
+from bot.projector.handlers.position_session import PositionSessionHandler
+
+# Ledger 모듈 import (선택적)
+try:
+    from core.ledger import JournalEntryBuilder, LedgerStore
+    LEDGER_AVAILABLE = True
+except ImportError:
+    LEDGER_AVAILABLE = False
+    JournalEntryBuilder = None  # type: ignore
+    LedgerStore = None  # type: ignore
+
+if TYPE_CHECKING:
+    from core.ledger import JournalEntryBuilder as JournalEntryBuilderType
+    from core.ledger import LedgerStore as LedgerStoreType
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +67,7 @@ class EventProjector:
         adapter: SQLiteAdapter,
         event_store: EventStore,
         checkpoint_name: str = CHECKPOINT_NAME,
+        enable_ledger: bool = True,
     ):
         self.adapter = adapter
         self.event_store = event_store
@@ -62,9 +79,18 @@ class EventProjector:
         # 기본 핸들러 등록
         self._register_default_handlers()
         
+        # 복식부기 (Ledger) 연동
+        self._ledger_enabled = False
+        self._ledger_store: LedgerStoreType | None = None
+        self._entry_builder: JournalEntryBuilderType | None = None
+        
+        if enable_ledger and LEDGER_AVAILABLE:
+            self._init_ledger()
+        
         # 통계
         self._processed_count = 0
         self._error_count = 0
+        self._ledger_entry_count = 0
     
     def _register_default_handlers(self) -> None:
         """기본 핸들러 등록"""
@@ -82,6 +108,51 @@ class EventProjector:
         order_handler = OrderProjectionHandler(self.adapter)
         for event_type in order_handler.handled_event_types:
             self._handlers[event_type] = order_handler
+        
+        # Position Session 핸들러 (TradeExecuted → position_session/position_trade)
+        position_session_handler = PositionSessionHandler(self.adapter)
+        # TradeExecuted는 여러 핸들러가 처리할 수 있음 - 별도 리스트로 관리
+        self._multi_handlers: dict[str, list[ProjectionHandler]] = {}
+        for event_type in position_session_handler.handled_event_types:
+            if event_type not in self._multi_handlers:
+                self._multi_handlers[event_type] = []
+            self._multi_handlers[event_type].append(position_session_handler)
+
+    def _init_ledger(self) -> None:
+        """복식부기 (Ledger) 초기화
+        
+        ledger 테이블이 존재하면 활성화, 없으면 비활성화.
+        """
+        try:
+            self._ledger_store = LedgerStore(self.adapter)
+            self._entry_builder = JournalEntryBuilder(self._ledger_store)
+            self._ledger_enabled = True
+            logger.info("Ledger integration enabled")
+        except Exception as e:
+            logger.warning(f"Ledger integration disabled: {e}")
+            self._ledger_enabled = False
+    
+    async def initialize(self) -> None:
+        """Projector 및 모든 핸들러 초기화
+        
+        테이블 생성 등 초기화 작업 수행.
+        Bot 시작 시 호출해야 함.
+        """
+        # 중복 핸들러 제거 (같은 핸들러가 여러 이벤트 타입에 등록됨)
+        unique_handlers = set(self._handlers.values())
+        
+        # multi_handlers도 포함
+        if hasattr(self, '_multi_handlers'):
+            for handlers in self._multi_handlers.values():
+                unique_handlers.update(handlers)
+        
+        for handler in unique_handlers:
+            try:
+                await handler.initialize()
+            except Exception as e:
+                logger.warning(f"Handler initialization failed: {e}")
+        
+        logger.info(f"Projector initialized with {len(unique_handlers)} handlers")
     
     def register_handler(self, handler: ProjectionHandler) -> None:
         """핸들러 등록
@@ -117,6 +188,7 @@ class EventProjector:
         last_processed_seq = last_seq
         
         for event in events:
+            # 단일 핸들러 처리
             handler = self._handlers.get(event.event_type)
             
             if handler:
@@ -136,6 +208,24 @@ class EventProjector:
                             "event_type": event.event_type,
                         },
                     )
+            
+            # 다중 핸들러 처리 (예: TradeExecuted → PositionSession)
+            if hasattr(self, '_multi_handlers'):
+                multi_handlers = self._multi_handlers.get(event.event_type, [])
+                for multi_handler in multi_handlers:
+                    try:
+                        await multi_handler.handle(event)
+                    except Exception as e:
+                        logger.error(
+                            f"Multi handler error: {e}",
+                            extra={
+                                "event_id": event.event_id,
+                                "event_type": event.event_type,
+                            },
+                        )
+            
+            # 복식부기 분개 생성 (실패해도 기존 로직에 영향 없음)
+            await self._process_ledger_entry(event)
             
             # 핸들러가 없어도 체크포인트는 진행
             last_processed_seq = event.seq
@@ -279,15 +369,53 @@ class EventProjector:
             )
         return []
     
+    async def _process_ledger_entry(self, event: Event) -> None:
+        """복식부기 분개 생성 및 저장
+        
+        실패해도 기존 Projection 로직에 영향 없음.
+        """
+        if not self._ledger_enabled:
+            return
+        
+        if self._entry_builder is None or self._ledger_store is None:
+            return
+        
+        try:
+            entry = await self._entry_builder.from_event(event)
+            if entry:
+                await self._ledger_store.save_entry(entry)
+                self._ledger_entry_count += 1
+        except Exception as e:
+            logger.warning(
+                f"Failed to create journal entry: {e}",
+                extra={
+                    "event_id": event.event_id,
+                    "event_type": event.event_type,
+                },
+            )
+
     def get_stats(self) -> dict[str, Any]:
         """통계 반환"""
         return {
             "processed_count": self._processed_count,
             "error_count": self._error_count,
             "handled_event_types": list(self._handlers.keys()),
+            "ledger_enabled": self._ledger_enabled,
+            "ledger_entry_count": self._ledger_entry_count,
         }
     
     def reset_stats(self) -> None:
         """통계 초기화"""
         self._processed_count = 0
         self._error_count = 0
+        self._ledger_entry_count = 0
+    
+    @property
+    def ledger_store(self) -> LedgerStoreType | None:
+        """Ledger 저장소 접근"""
+        return self._ledger_store
+    
+    @property
+    def is_ledger_enabled(self) -> bool:
+        """Ledger 활성화 여부"""
+        return self._ledger_enabled

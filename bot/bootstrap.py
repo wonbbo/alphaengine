@@ -22,7 +22,7 @@ from uuid import uuid4
 from adapters.binance.rest_client import BinanceRestClient
 from adapters.db.sqlite_adapter import SQLiteAdapter, init_schema
 from core.config.loader import get_settings
-from core.constants import BinanceUrls, Defaults
+from core.constants import BinanceEndpoints, Defaults
 from core.domain.events import Event
 from core.domain.state_machines import EngineStateMachine, EngineState
 from core.storage.command_store import CommandStore
@@ -129,9 +129,9 @@ class BotEngine:
     def _create_rest_client(self) -> BinanceRestClient:
         """REST 클라이언트 생성"""
         if self.settings.mode.value == "testnet":
-            base_url = BinanceUrls.TESTNET_REST
+            base_url = BinanceEndpoints.TEST_REST_URL
         else:
-            base_url = BinanceUrls.PROD_REST
+            base_url = BinanceEndpoints.PROD_REST_URL
         
         return BinanceRestClient(
             base_url=base_url,
@@ -283,6 +283,7 @@ class BotEngine:
         
         # 1. Projector
         self.projector = EventProjector(self.db, self.event_store)
+        await self.projector.initialize()
         logger.info("  - Projector 초기화 완료")
         
         # 2. Risk Guard (ConfigStore 연결)
@@ -312,9 +313,9 @@ class BotEngine:
         
         # 5. WebSocket Listener
         if self.settings.mode.value == "testnet":
-            ws_url = BinanceUrls.TESTNET_WS
+            ws_url = BinanceEndpoints.TEST_WS_URL
         else:
-            ws_url = BinanceUrls.PROD_WS
+            ws_url = BinanceEndpoints.PROD_WS_URL
         
         self.ws_listener = WebSocketListener(
             ws_base_url=ws_url,
@@ -646,7 +647,7 @@ class BotEngine:
                 
                 # 6. Heartbeat 로그 (10초마다)
                 if self._tick_count % 100 == 0:
-                    self._log_heartbeat()
+                    await self._log_heartbeat()
                     
             except Exception as e:
                 logger.error(f"메인 루프 에러: {e}")
@@ -655,7 +656,7 @@ class BotEngine:
         
         logger.info("메인 루프 종료")
     
-    def _log_heartbeat(self) -> None:
+    async def _log_heartbeat(self) -> None:
         """Heartbeat 로그"""
         stats = {
             "tick": self._tick_count,
@@ -664,10 +665,11 @@ class BotEngine:
         }
         
         if self.command_processor:
-            pending = asyncio.get_event_loop().run_until_complete(
-                self.command_processor.get_pending_count()
-            ) if asyncio.get_event_loop().is_running() else 0
-            stats["pending_commands"] = pending
+            try:
+                pending = await self.command_processor.get_pending_count()
+                stats["pending_commands"] = pending
+            except Exception:
+                stats["pending_commands"] = 0
         
         if self.strategy_runner:
             stats["strategy"] = self.strategy_runner.strategy.name if self.strategy_runner.strategy else None

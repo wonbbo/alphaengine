@@ -3,6 +3,8 @@
 const API_BASE = '/api/transfer';
 let currentTransferId = null;
 let pollingInterval = null;
+let maxDepositAmount = 0;
+let maxWithdrawAmount = 0;
 
 // =========================================================================
 // 입금 상태
@@ -15,6 +17,21 @@ async function loadDepositStatus() {
     
     try {
         const response = await fetch(`${API_BASE}/deposit/status`);
+        
+        // 입출금 기능 비활성화 체크 (503)
+        if (response.status === 503) {
+            const errorData = await response.json();
+            const reason = errorData.detail?.reason || '입출금 기능이 비활성화되어 있습니다.';
+            statusDiv.innerHTML = `
+                <div class="alert alert-warning">
+                    <i class="bi bi-info-circle"></i> ${reason}
+                </div>
+            `;
+            form.classList.add('d-none');
+            unavailable.classList.add('d-none');
+            return;
+        }
+        
         const data = await response.json();
         
         if (data.can_deposit && !data.pending_deposit) {
@@ -47,8 +64,8 @@ async function loadDepositStatus() {
             unavailable.classList.add('d-none');
             
             // 최대 입금 가능 금액 설정
-            const maxDeposit = parseFloat(data.krw_balance) - parseFloat(data.fee_krw);
-            document.getElementById('deposit-amount').max = Math.floor(maxDeposit);
+            maxDepositAmount = Math.floor(parseFloat(data.krw_balance) - parseFloat(data.fee_krw));
+            document.getElementById('deposit-amount').max = maxDepositAmount;
             
         } else if (data.pending_deposit) {
             // 입금 진행 중
@@ -93,6 +110,22 @@ async function loadWithdrawStatus() {
     
     try {
         const response = await fetch(`${API_BASE}/withdraw/status`);
+        
+        // 입출금 기능 비활성화 체크 (503)
+        if (response.status === 503) {
+            const errorData = await response.json();
+            const reason = errorData.detail?.reason || '입출금 기능이 비활성화되어 있습니다.';
+            statusDiv.innerHTML = `
+                <div class="alert alert-warning">
+                    <i class="bi bi-info-circle"></i> ${reason}
+                </div>
+            `;
+            form.classList.add('d-none');
+            unavailable.classList.add('d-none');
+            if (positionWarning) positionWarning.classList.add('d-none');
+            return;
+        }
+        
         const data = await response.json();
         
         if (data.can_withdraw && !data.pending_withdraw) {
@@ -124,7 +157,8 @@ async function loadWithdrawStatus() {
             }
             
             // 최대 출금 가능 금액 설정
-            document.getElementById('withdraw-amount').max = parseFloat(data.usdt_balance);
+            maxWithdrawAmount = parseFloat(data.usdt_balance);
+            document.getElementById('withdraw-amount').max = maxWithdrawAmount;
             
         } else if (data.pending_withdraw) {
             // 출금 진행 중
@@ -290,12 +324,30 @@ async function loadTransferProgress(transferId) {
         const cancellable = ['PENDING', 'PURCHASING'].includes(data.status);
         cancelBtn.style.display = cancellable ? 'inline-block' : 'none';
         
-        // 완료/실패 시 폴링 중지
+        // 완료/실패 시 폴링 중지 및 알림 표시
         if (['COMPLETED', 'FAILED', 'CANCELLED'].includes(data.status)) {
             stopPolling();
             loadDepositStatus();
             loadWithdrawStatus();
             loadHistory();
+            
+            // Toast 알림 표시
+            const typeText = data.transfer_type === 'DEPOSIT' ? '입금' : '출금';
+            if (data.status === 'COMPLETED') {
+                const actualAmount = data.actual_amount 
+                    ? formatNumber(data.actual_amount) + (data.transfer_type === 'DEPOSIT' ? ' USDT' : '원')
+                    : '';
+                showToast(`${typeText} 완료! ${actualAmount}`, 'success');
+            } else if (data.status === 'FAILED') {
+                showToast(`${typeText} 실패: ${data.error_message || '알 수 없는 오류'}`, 'danger');
+            } else if (data.status === 'CANCELLED') {
+                showToast(`${typeText}이 취소되었습니다.`, 'warning');
+            }
+            
+            // 진행 상태 섹션 3초 후 숨김
+            setTimeout(() => {
+                section.style.display = 'none';
+            }, 3000);
         }
         
     } catch (error) {
@@ -566,4 +618,73 @@ function getStatusText(status) {
         'CANCELLED': '취소됨'
     };
     return statusMap[status] || status;
+}
+
+// =========================================================================
+// 퍼센트 버튼
+// =========================================================================
+
+function setDepositPercent(percent) {
+    if (maxDepositAmount <= 0) return;
+    
+    let amount = Math.floor(maxDepositAmount * percent / 100);
+    
+    // 최소 금액 체크
+    if (amount < 5000) {
+        amount = Math.min(5000, maxDepositAmount);
+    }
+    
+    // 1000원 단위로 내림
+    amount = Math.floor(amount / 1000) * 1000;
+    
+    document.getElementById('deposit-amount').value = amount;
+}
+
+function setWithdrawPercent(percent) {
+    if (maxWithdrawAmount <= 0) return;
+    
+    let amount = maxWithdrawAmount * percent / 100;
+    
+    // 최소 금액 체크
+    if (amount < 10) {
+        amount = Math.min(10, maxWithdrawAmount);
+    }
+    
+    // 소수점 2자리까지
+    amount = Math.floor(amount * 100) / 100;
+    
+    document.getElementById('withdraw-amount').value = amount;
+}
+
+// =========================================================================
+// Toast 알림
+// =========================================================================
+
+function showToast(message, type = 'info') {
+    let container = document.getElementById('toast-container');
+    if (!container) {
+        container = document.createElement('div');
+        container.id = 'toast-container';
+        container.className = 'toast-container position-fixed bottom-0 end-0 p-3';
+        document.body.appendChild(container);
+    }
+    
+    const toastEl = document.createElement('div');
+    toastEl.className = `toast align-items-center text-white bg-${type} border-0`;
+    toastEl.setAttribute('role', 'alert');
+    toastEl.innerHTML = `
+        <div class="d-flex">
+            <div class="toast-body">
+                <i class="bi bi-${type === 'success' ? 'check-circle' : type === 'danger' ? 'x-circle' : 'info-circle'}"></i>
+                ${message}
+            </div>
+            <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+        </div>
+    `;
+    
+    container.appendChild(toastEl);
+    const toast = new bootstrap.Toast(toastEl, { delay: 5000 });
+    toast.show();
+    
+    toastEl.addEventListener('hidden.bs.toast', () => toastEl.remove());
 }

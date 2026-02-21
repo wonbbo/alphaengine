@@ -1,0 +1,152 @@
+{% extends "base.html" %}
+
+{% block title %}Trading Edge - AlphaEngine{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12">
+        <h2><i class="bi bi-bar-chart-line"></i> Trading Edge</h2>
+    </div>
+</div>
+
+<!-- Edge 요약 카드 -->
+<div class="row mb-4">
+    <div class="col-md-2">
+        <div class="card stat-card">
+            <div class="card-body edge-stat">
+                <div class="value" id="total-pnl">-</div>
+                <div class="label">Total PnL</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-2">
+        <div class="card stat-card">
+            <div class="card-body edge-stat">
+                <div class="value" id="total-trades">-</div>
+                <div class="label">거래 수</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-2">
+        <div class="card stat-card">
+            <div class="card-body edge-stat">
+                <div class="value" id="win-rate">-</div>
+                <div class="label">승률</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-2">
+        <div class="card stat-card">
+            <div class="card-body edge-stat">
+                <div class="value" id="avg-pnl">-</div>
+                <div class="label">평균 PnL</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-2">
+        <div class="card stat-card">
+            <div class="card-body edge-stat">
+                <div class="value" id="profit-factor">-</div>
+                <div class="label">Profit Factor</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-2">
+        <div class="card stat-card">
+            <div class="card-body edge-stat">
+                <div class="value" id="total-fees">-</div>
+                <div class="label">총 수수료</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 누적 Edge 차트 -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <i class="bi bi-graph-up"></i> 누적 손익 곡선
+            </div>
+            <div class="card-body">
+                <div class="chart-container chart-container-lg">
+                    <canvas id="cumulative-edge-chart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <!-- 심볼별 성과 -->
+    <div class="col-md-6 mb-4">
+        <div class="card">
+            <div class="card-header">
+                <i class="bi bi-list-columns-reverse"></i> 심볼별 성과
+            </div>
+            <div class="card-body">
+                <div class="chart-container">
+                    <canvas id="symbol-pnl-chart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 심볼별 상세 테이블 -->
+    <div class="col-md-6 mb-4">
+        <div class="card">
+            <div class="card-header">
+                <i class="bi bi-table"></i> 심볼별 상세
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-sm">
+                        <thead>
+                            <tr>
+                                <th>심볼</th>
+                                <th class="text-end">거래</th>
+                                <th class="text-end">승률</th>
+                                <th class="text-end">Net PnL</th>
+                            </tr>
+                        </thead>
+                        <tbody id="symbols-table">
+                            <tr>
+                                <td colspan="4" class="text-center">로딩 중...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 최고/최저 수익일 -->
+<div class="row">
+    <div class="col-md-6 mb-4">
+        <div class="card border-success">
+            <div class="card-header bg-success text-white">
+                <i class="bi bi-trophy"></i> Best Trading Day
+            </div>
+            <div class="card-body" id="best-day">
+                <p class="text-muted text-center">로딩 중...</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6 mb-4">
+        <div class="card border-danger">
+            <div class="card-header bg-danger text-white">
+                <i class="bi bi-exclamation-triangle"></i> Worst Trading Day
+            </div>
+            <div class="card-body" id="worst-day">
+                <p class="text-muted text-center">로딩 중...</p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/chart-utils.js"></script>
+<script src="/static/js/trading_edge.js"></script>
+{% endblock %}

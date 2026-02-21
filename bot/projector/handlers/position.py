@@ -29,6 +29,10 @@ class PositionProjectionHandler(ProjectionHandler):
     def handled_event_types(self) -> list[str]:
         return [EventTypes.POSITION_CHANGED]
     
+    async def initialize(self) -> None:
+        """테이블 초기화"""
+        await self._ensure_table_exists()
+    
     async def handle(self, event: Event) -> bool:
         """PositionChanged 이벤트 처리"""
         if event.event_type != EventTypes.POSITION_CHANGED:

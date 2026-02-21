@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+
+{% block title %}포지션 상세 - AlphaEngine{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12">
+        <nav aria-label="breadcrumb">
+            <ol class="breadcrumb">
+                <li class="breadcrumb-item"><a href="/positions">포지션 히스토리</a></li>
+                <li class="breadcrumb-item active">{{ session_id[:8] }}...</li>
+            </ol>
+        </nav>
+    </div>
+</div>
+
+<!-- 포지션 헤더 -->
+<div id="position-header" class="position-header mb-4">
+    <div class="d-flex justify-content-between align-items-center">
+        <div>
+            <h3 id="position-symbol">-</h3>
+            <span class="badge bg-light text-dark" id="position-side">-</span>
+            <span class="badge" id="position-status">-</span>
+        </div>
+        <div class="text-end">
+            <div class="fs-4" id="position-pnl">-</div>
+            <small>Realized PnL</small>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <!-- 포지션 요약 -->
+    <div class="col-md-4 mb-4">
+        <div class="card">
+            <div class="card-header">
+                <i class="bi bi-info-circle"></i> 포지션 요약
+            </div>
+            <div class="card-body">
+                <dl class="row mb-0">
+                    <dt class="col-6">진입 시간</dt>
+                    <dd class="col-6" id="detail-opened-at">-</dd>
+                    
+                    <dt class="col-6">청산 시간</dt>
+                    <dd class="col-6" id="detail-closed-at">-</dd>
+                    
+                    <dt class="col-6">초기 수량</dt>
+                    <dd class="col-6" id="detail-initial-qty">-</dd>
+                    
+                    <dt class="col-6">최대 수량</dt>
+                    <dd class="col-6" id="detail-max-qty">-</dd>
+                    
+                    <dt class="col-6">거래 횟수</dt>
+                    <dd class="col-6" id="detail-trade-count">-</dd>
+                    
+                    <dt class="col-6">총 수수료</dt>
+                    <dd class="col-6" id="detail-commission">-</dd>
+                    
+                    <dt class="col-6">청산 이유</dt>
+                    <dd class="col-6" id="detail-close-reason">-</dd>
+                </dl>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 거래 내역 -->
+    <div class="col-md-8 mb-4">
+        <div class="card">
+            <div class="card-header">
+                <i class="bi bi-list-ul"></i> 거래 내역
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-sm">
+                        <thead>
+                            <tr>
+                                <th>시간</th>
+                                <th>Action</th>
+                                <th class="text-end">수량</th>
+                                <th class="text-end">가격</th>
+                                <th class="text-end">PnL</th>
+                                <th class="text-end">수수료</th>
+                                <th class="text-end">잔여</th>
+                            </tr>
+                        </thead>
+                        <tbody id="trades-table">
+                            <tr>
+                                <td colspan="7" class="text-center">로딩 중...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 타임라인 -->
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <i class="bi bi-clock-history"></i> 타임라인
+            </div>
+            <div class="card-body">
+                <div class="position-timeline" id="timeline">
+                    <div class="text-center text-muted">로딩 중...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const SESSION_ID = "{{ session_id }}";
+</script>
+<script src="/static/js/positions.js"></script>
+{% endblock %}

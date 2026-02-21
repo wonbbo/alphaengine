@@ -34,6 +34,10 @@ class OrderProjectionHandler(ProjectionHandler):
             EventTypes.ORDER_REJECTED,
         ]
     
+    async def initialize(self) -> None:
+        """테이블 초기화"""
+        await self._ensure_table_exists()
+    
     async def handle(self, event: Event) -> bool:
         """Order 이벤트 처리"""
         if event.event_type not in self.handled_event_types:

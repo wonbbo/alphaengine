@@ -29,6 +29,33 @@ class BalanceProjectionHandler(ProjectionHandler):
     def handled_event_types(self) -> list[str]:
         return [EventTypes.BALANCE_CHANGED]
     
+    async def initialize(self) -> None:
+        """테이블 초기화"""
+        await self._ensure_table_exists()
+    
+    async def _ensure_table_exists(self) -> None:
+        """projection_balance 테이블 존재 확인 및 생성"""
+        sql = """
+            CREATE TABLE IF NOT EXISTS projection_balance (
+                id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                scope_exchange   TEXT NOT NULL,
+                scope_venue      TEXT NOT NULL,
+                scope_account_id TEXT NOT NULL,
+                scope_mode       TEXT NOT NULL DEFAULT 'TESTNET',
+                
+                asset            TEXT NOT NULL,
+                free             TEXT NOT NULL DEFAULT '0',
+                locked           TEXT NOT NULL DEFAULT '0',
+                
+                last_event_seq   INTEGER NOT NULL,
+                updated_at       TEXT NOT NULL DEFAULT (datetime('now')),
+                
+                UNIQUE(scope_exchange, scope_venue, scope_account_id, asset, scope_mode)
+            )
+        """
+        await self.adapter.execute(sql)
+        await self.adapter.commit()
+    
     async def handle(self, event: Event) -> bool:
         """BalanceChanged 이벤트 처리"""
         if event.event_type != EventTypes.BALANCE_CHANGED:

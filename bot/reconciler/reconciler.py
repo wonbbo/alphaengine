@@ -74,6 +74,14 @@ class HybridReconciler:
         self._drift_count = 0
         self._event_count = 0
     
+    def _to_timestamp_ms(self, trade_time: int | datetime | None) -> int:
+        """trade_time을 밀리초 타임스탬프로 변환"""
+        if trade_time is None:
+            return 0
+        if isinstance(trade_time, datetime):
+            return int(trade_time.timestamp() * 1000)
+        return trade_time
+    
     @property
     def poll_interval(self) -> int:
         """현재 폴링 간격"""
@@ -196,8 +204,9 @@ class HybridReconciler:
                     )
                 
                 # 마지막 체결 시간 업데이트
-                if trade.trade_time > self._last_trade_time:
-                    self._last_trade_time = trade.trade_time
+                trade_time_ms = self._to_timestamp_ms(trade.trade_time)
+                if trade_time_ms > self._last_trade_time:
+                    self._last_trade_time = trade_time_ms
             
             return event_count
             
@@ -222,8 +231,9 @@ class HybridReconciler:
                 if saved:
                     event_count += 1
                 
-                if trade.trade_time > self._last_trade_time:
-                    self._last_trade_time = trade.trade_time
+                trade_time_ms = self._to_timestamp_ms(trade.trade_time)
+                if trade_time_ms > self._last_trade_time:
+                    self._last_trade_time = trade_time_ms
             
             logger.info(f"Synced {event_count} trades from history")
             return event_count
@@ -307,7 +317,11 @@ class HybridReconciler:
             
             # Projection 포지션 조회
             projection_position = await self.projection_getter.get_position(
-                self.scope, self.symbol
+                exchange=self.scope.exchange,
+                venue=self.scope.venue,
+                account_id=self.scope.account_id,
+                mode=self.scope.mode,
+                symbol=self.symbol,
             )
             
             # Drift 감지
@@ -347,7 +361,11 @@ class HybridReconciler:
             
             # Projection 잔고 조회
             projection_balance = await self.projection_getter.get_balance(
-                self.scope, "USDT"
+                exchange=self.scope.exchange,
+                venue=self.scope.venue,
+                account_id=self.scope.account_id,
+                mode=self.scope.mode,
+                asset="USDT",
             )
             
             # Drift 감지
@@ -389,6 +407,11 @@ class HybridReconciler:
             exchange_trade_id=str(trade.trade_id),
         )
         
+        # trade_time을 밀리초 타임스탬프로 변환 (JSON 직렬화 가능)
+        trade_time_ms = trade.trade_time
+        if isinstance(trade_time_ms, datetime):
+            trade_time_ms = int(trade_time_ms.timestamp() * 1000)
+        
         return Event.create(
             event_type=EventTypes.TRADE_EXECUTED,
             source="REST",
@@ -406,7 +429,7 @@ class HybridReconciler:
                 "commission": str(trade.commission),
                 "commission_asset": trade.commission_asset,
                 "realized_pnl": str(trade.realized_pnl),
-                "trade_time": trade.trade_time,
+                "trade_time": trade_time_ms,
                 "is_maker": trade.is_maker,
             },
         )

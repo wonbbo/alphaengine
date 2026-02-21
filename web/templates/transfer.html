@@ -42,6 +42,12 @@
                                    min="5000" step="1000" placeholder="최소 5,000원">
                             <span class="input-group-text">원</span>
                         </div>
+                        <div class="btn-group w-100 mt-2" role="group">
+                            <button type="button" class="btn btn-outline-secondary btn-sm" onclick="setDepositPercent(25)">25%</button>
+                            <button type="button" class="btn btn-outline-secondary btn-sm" onclick="setDepositPercent(50)">50%</button>
+                            <button type="button" class="btn btn-outline-secondary btn-sm" onclick="setDepositPercent(75)">75%</button>
+                            <button type="button" class="btn btn-outline-success btn-sm" onclick="setDepositPercent(100)">최대</button>
+                        </div>
                         <div class="form-text">수수료 약 1 TRX (≈ 150원) 발생</div>
                     </div>
                     <button type="submit" class="btn btn-success w-100" id="deposit-btn">
@@ -79,6 +85,12 @@
                             <input type="number" class="form-control" id="withdraw-amount" 
                                    min="10" step="1" placeholder="최소 10 USDT">
                             <span class="input-group-text">USDT</span>
+                        </div>
+                        <div class="btn-group w-100 mt-2" role="group">
+                            <button type="button" class="btn btn-outline-secondary btn-sm" onclick="setWithdrawPercent(25)">25%</button>
+                            <button type="button" class="btn btn-outline-secondary btn-sm" onclick="setWithdrawPercent(50)">50%</button>
+                            <button type="button" class="btn btn-outline-secondary btn-sm" onclick="setWithdrawPercent(75)">75%</button>
+                            <button type="button" class="btn btn-outline-danger btn-sm" onclick="setWithdrawPercent(100)">최대</button>
                         </div>
                         <div class="form-text">수수료 약 1 TRX 발생</div>
                     </div>
@@ -202,6 +214,7 @@
 {% endblock %}
 
 {% block scripts %}
+<script src="/static/js/transfer.js"></script>
 <script>
     // 페이지 로드 시 초기화
     document.addEventListener('DOMContentLoaded', function() {

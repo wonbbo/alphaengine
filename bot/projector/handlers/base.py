@@ -41,3 +41,11 @@ class ProjectionHandler(ABC):
     def handled_event_types(self) -> list[str]:
         """처리하는 이벤트 타입 목록"""
         pass
+    
+    async def initialize(self) -> None:
+        """핸들러 초기화 (테이블 생성 등)
+        
+        하위 클래스에서 필요 시 오버라이드.
+        Projector 시작 시 호출됨.
+        """
+        pass

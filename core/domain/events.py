@@ -32,6 +32,7 @@ class Event:
     scope: Scope
     dedup_key: str
     payload: dict[str, Any]
+    seq: int | None = None  # DB에서 조회 시 자동 할당되는 시퀀스 번호
 
     @staticmethod
     def create(

@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+
+{% block title %}자산 현황 - AlphaEngine{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12">
+        <h2><i class="bi bi-wallet2"></i> 자산 현황</h2>
+    </div>
+</div>
+
+<!-- 자산 요약 카드 -->
+<div class="row mb-4">
+    <div class="col-md-4">
+        <div class="card stat-card">
+            <div class="card-body">
+                <div class="stat-label">SPOT</div>
+                <div class="stat-value" id="spot-total">-</div>
+                <div class="text-muted">USDT</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card stat-card">
+            <div class="card-body">
+                <div class="stat-label">FUTURES</div>
+                <div class="stat-value" id="futures-total">-</div>
+                <div class="text-muted">USDT</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card stat-card">
+            <div class="card-body">
+                <div class="stat-label">Total</div>
+                <div class="stat-value text-primary" id="total-assets">-</div>
+                <div class="text-muted">USDT</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 자산 상세 -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <i class="bi bi-currency-exchange"></i> Venue별 자산
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead>
+                            <tr>
+                                <th>Venue</th>
+                                <th>Asset</th>
+                                <th class="text-end">잔액</th>
+                                <th>최종 업데이트</th>
+                            </tr>
+                        </thead>
+                        <tbody id="assets-table">
+                            <tr>
+                                <td colspan="4" class="text-center">로딩 중...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 시산표 -->
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-journal-check"></i> 시산표 (Trial Balance)</span>
+                <button class="btn btn-sm btn-outline-primary" onclick="toggleTrialBalance()">
+                    <i class="bi bi-chevron-down" id="trial-balance-icon"></i>
+                </button>
+            </div>
+            <div class="card-body collapse" id="trial-balance-section">
+                <div class="table-responsive">
+                    <table class="table table-sm">
+                        <thead>
+                            <tr>
+                                <th>계정 ID</th>
+                                <th>계정 타입</th>
+                                <th>Venue</th>
+                                <th>Asset</th>
+                                <th class="text-end">잔액</th>
+                            </tr>
+                        </thead>
+                        <tbody id="trial-balance-table">
+                            <tr>
+                                <td colspan="5" class="text-center">로딩 중...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/assets.js"></script>
+{% endblock %}

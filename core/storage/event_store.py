@@ -353,4 +353,5 @@ class EventStore:
             scope=scope,
             dedup_key=row[15],
             payload=payload,
+            seq=row[0],  # DB 시퀀스 번호
         )

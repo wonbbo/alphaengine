@@ -57,18 +57,20 @@ def set_transfer_manager(manager: Any) -> None:
     _transfer_manager = manager
 
 
-def get_transfer_manager() -> Any:
+def get_transfer_manager() -> Any | None:
     """TransferManager 반환
     
     Returns:
-        TransferManager 인스턴스
-        
-    Raises:
-        RuntimeError: TransferManager가 설정되지 않은 경우
+        TransferManager 인스턴스 또는 None (설정되지 않은 경우)
     """
-    if _transfer_manager is None:
-        raise RuntimeError(
-            "TransferManager not initialized. "
-            "Call set_transfer_manager() from bot bootstrap."
-        )
     return _transfer_manager
+
+
+def is_transfer_available() -> bool:
+    """입출금 기능 사용 가능 여부
+    
+    Returns:
+        True: TransferManager가 초기화된 경우
+        False: 초기화되지 않은 경우 (Testnet, Upbit 미설정 등)
+    """
+    return _transfer_manager is not None

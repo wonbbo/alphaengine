@@ -1,0 +1,184 @@
+{% extends "base.html" %}
+
+{% block title %}Commands - AlphaEngine{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12 d-flex justify-content-between align-items-center">
+        <h2><i class="bi bi-terminal"></i> Commands</h2>
+        <button class="btn btn-primary" onclick="showCreateModal()">
+            <i class="bi bi-plus-lg"></i> 새 Command
+        </button>
+    </div>
+</div>
+
+<!-- 필터 -->
+<div class="filter-form mb-4">
+    <div class="row g-3 align-items-end">
+        <div class="col-md-3">
+            <label class="form-label">상태</label>
+            <select class="form-select" id="filter-status" onchange="loadCommands()">
+                <option value="">전체</option>
+                <option value="NEW">NEW</option>
+                <option value="SENT">SENT</option>
+                <option value="ACK">ACK</option>
+                <option value="FAILED">FAILED</option>
+            </select>
+        </div>
+        <div class="col-md-3">
+            <label class="form-label">
+                <input type="checkbox" id="filter-include-completed" checked onchange="loadCommands()">
+                완료된 것 포함
+            </label>
+        </div>
+        <div class="col-md-2">
+            <button class="btn btn-outline-secondary" onclick="loadCommands()">
+                <i class="bi bi-arrow-clockwise"></i> 새로고침
+            </button>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-hover">
+                <thead>
+                    <tr>
+                        <th style="width: 180px;">시간</th>
+                        <th>타입</th>
+                        <th>심볼</th>
+                        <th>상태</th>
+                        <th>Actor</th>
+                        <th>상세</th>
+                    </tr>
+                </thead>
+                <tbody id="commands-table">
+                    <tr>
+                        <td colspan="6" class="text-center">로딩 중...</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        
+        <div class="d-flex justify-content-between align-items-center mt-3">
+            <div class="pagination-info" id="pagination-info">-</div>
+        </div>
+    </div>
+</div>
+
+<!-- Command 생성 모달 -->
+<div class="modal fade" id="createCommandModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">새 Command 발행</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <form id="create-command-form">
+                    <div class="mb-3">
+                        <label class="form-label">Command 타입</label>
+                        <select class="form-select" id="command-type" required>
+                            <option value="">선택...</option>
+                        </select>
+                    </div>
+                    
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label class="form-label">Exchange</label>
+                            <input type="text" class="form-control" id="scope-exchange" value="BINANCE" readonly>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Venue</label>
+                            <select class="form-select" id="scope-venue">
+                                <option value="FUTURES">FUTURES</option>
+                                <option value="SPOT">SPOT</option>
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label class="form-label">심볼 (선택)</label>
+                            <input type="text" class="form-control" id="scope-symbol" placeholder="BTCUSDT">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">우선순위</label>
+                            <select class="form-select" id="command-priority">
+                                <option value="1">1 (낮음)</option>
+                                <option value="5" selected>5 (보통)</option>
+                                <option value="10">10 (높음)</option>
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label">Payload (JSON)</label>
+                        <textarea class="form-control font-monospace" id="command-payload" rows="5">{}</textarea>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">취소</button>
+                <button type="button" class="btn btn-primary" onclick="createCommand()">
+                    <i class="bi bi-send"></i> 발행
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Command 상세 모달 -->
+<div class="modal fade modal-detail" id="commandDetailModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Command 상세</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <dl class="row">
+                    <dt class="col-sm-3">Command ID</dt>
+                    <dd class="col-sm-9"><code id="detail-command-id">-</code></dd>
+                    
+                    <dt class="col-sm-3">타입</dt>
+                    <dd class="col-sm-9" id="detail-command-type">-</dd>
+                    
+                    <dt class="col-sm-3">시간</dt>
+                    <dd class="col-sm-9" id="detail-ts">-</dd>
+                    
+                    <dt class="col-sm-3">상태</dt>
+                    <dd class="col-sm-9" id="detail-status">-</dd>
+                    
+                    <dt class="col-sm-3">Actor</dt>
+                    <dd class="col-sm-9" id="detail-actor">-</dd>
+                    
+                    <dt class="col-sm-3">Scope</dt>
+                    <dd class="col-sm-9" id="detail-scope">-</dd>
+                </dl>
+                
+                <h6>Payload</h6>
+                <pre class="json-viewer" id="detail-payload">-</pre>
+                
+                <div id="detail-result-section" style="display: none;">
+                    <h6>Result</h6>
+                    <pre class="json-viewer" id="detail-result">-</pre>
+                </div>
+                
+                <div id="detail-error-section" style="display: none;">
+                    <h6 class="text-danger">Error</h6>
+                    <div class="alert alert-danger" id="detail-error">-</div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">닫기</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/commands.js"></script>
+{% endblock %}
