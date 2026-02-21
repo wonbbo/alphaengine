@@ -10,48 +10,48 @@
 </div>
 
 <!-- PnL 요약 카드 -->
-<div class="row mb-4">
-    <div class="col-md-3">
-        <div class="card stat-card">
+<div class="row mb-4 g-2 g-md-3">
+    <div class="col-6 col-md-3">
+        <div class="card stat-card h-100">
             <div class="card-body">
                 <div class="stat-label">오늘 수익</div>
                 <div class="stat-value" id="daily-pnl">-</div>
-                <div class="text-muted" id="daily-return">-</div>
+                <div class="text-muted small" id="daily-return">-</div>
             </div>
         </div>
     </div>
-    <div class="col-md-3">
-        <div class="card stat-card">
+    <div class="col-6 col-md-3">
+        <div class="card stat-card h-100">
             <div class="card-body">
                 <div class="stat-label">이번 주 수익</div>
                 <div class="stat-value" id="weekly-pnl">-</div>
-                <div class="text-muted" id="weekly-return">-</div>
+                <div class="text-muted small" id="weekly-return">-</div>
             </div>
         </div>
     </div>
-    <div class="col-md-3">
-        <div class="card stat-card">
+    <div class="col-6 col-md-3">
+        <div class="card stat-card h-100">
             <div class="card-body">
                 <div class="stat-label">이번 달 수익</div>
                 <div class="stat-value" id="monthly-pnl">-</div>
-                <div class="text-muted" id="monthly-return">-</div>
+                <div class="text-muted small" id="monthly-return">-</div>
             </div>
         </div>
     </div>
-    <div class="col-md-3">
-        <div class="card stat-card">
+    <div class="col-6 col-md-3">
+        <div class="card stat-card h-100">
             <div class="card-body">
                 <div class="stat-label">총 자산</div>
                 <div class="stat-value" id="total-equity">-</div>
-                <div class="text-muted" id="total-return">-</div>
+                <div class="text-muted small" id="total-return">-</div>
             </div>
         </div>
     </div>
 </div>
 
 <!-- 차트 -->
-<div class="row mb-4">
-    <div class="col-md-6">
+<div class="row mb-3 mb-md-4 g-2 g-md-3">
+    <div class="col-12 col-md-6">
         <div class="card">
             <div class="card-header">
                 <i class="bi bi-bar-chart"></i> 일별 수익
@@ -63,7 +63,7 @@
             </div>
         </div>
     </div>
-    <div class="col-md-6">
+    <div class="col-12 col-md-6">
         <div class="card">
             <div class="card-header">
                 <i class="bi bi-graph-up"></i> 누적 수익
@@ -77,8 +77,8 @@
     </div>
 </div>
 
-<div class="row mb-4">
-    <div class="col-md-6">
+<div class="row mb-3 mb-md-4 g-2 g-md-3">
+    <div class="col-12 col-md-6">
         <div class="card">
             <div class="card-header">
                 <i class="bi bi-percent"></i> 일별 수익률
@@ -90,7 +90,7 @@
             </div>
         </div>
     </div>
-    <div class="col-md-6">
+    <div class="col-12 col-md-6">
         <div class="card">
             <div class="card-header">
                 <i class="bi bi-graph-up-arrow"></i> 누적 수익률
@@ -104,20 +104,20 @@
     </div>
 </div>
 
-<!-- Venue별 자산 현황 -->
+<!-- 계좌별 자산 현황 -->
 <div class="row mb-4">
     <div class="col-12">
         <div class="card">
             <div class="card-header">
-                <i class="bi bi-wallet2"></i> Venue별 자산 현황
+                <i class="bi bi-wallet2"></i> 계좌별 자산 현황
             </div>
             <div class="card-body">
                 <div class="table-responsive">
                     <table class="table table-hover">
                         <thead>
                             <tr>
-                                <th>Venue</th>
-                                <th>Asset</th>
+                                <th>계좌</th>
+                                <th>코인</th>
                                 <th class="text-end">잔액</th>
                             </tr>
                         </thead>
@@ -128,7 +128,7 @@
                         </tbody>
                         <tfoot>
                             <tr class="table-secondary">
-                                <th colspan="2">Total (USDT)</th>
+                                <th colspan="2">전체</th>
                                 <th class="text-end" id="total-assets">-</th>
                             </tr>
                         </tfoot>
@@ -140,9 +140,9 @@
 </div>
 
 <!-- 현재 포지션 / 최근 체결 -->
-<div class="row">
-    <div class="col-md-6">
-        <div class="card">
+<div class="row g-2 g-md-3">
+    <div class="col-12 col-md-6 mb-3 mb-md-0">
+        <div class="card h-100">
             <div class="card-header">
                 <i class="bi bi-bullseye"></i> 현재 포지션
             </div>
@@ -151,18 +151,18 @@
             </div>
         </div>
     </div>
-    <div class="col-md-6">
-        <div class="card">
+    <div class="col-12 col-md-6">
+        <div class="card h-100">
             <div class="card-header">
                 <i class="bi bi-clock-history"></i> 최근 체결
             </div>
             <div class="card-body">
                 <div class="table-responsive">
-                    <table class="table table-sm">
+                    <table class="table table-sm mb-0">
                         <thead>
                             <tr>
                                 <th>시간</th>
-                                <th>심볼</th>
+                                <th>방향</th>
                                 <th class="text-end">수량</th>
                                 <th class="text-end">PnL</th>
                             </tr>

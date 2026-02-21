@@ -183,17 +183,19 @@ class EventTypes:
     DEPOSIT_INITIATED: str = "DepositInitiated"  # 입금 요청 시작
     DEPOSIT_TRX_PURCHASED: str = "DepositTrxPurchased"  # Upbit TRX 매수 완료
     DEPOSIT_TRX_SENT: str = "DepositTrxSent"  # Upbit -> Binance 전송
-    DEPOSIT_TRX_RECEIVED: str = "DepositTrxReceived"  # Binance 입금 확인
+    DEPOSIT_TRX_RECEIVED: str = "DepositTrxReceived"  # Binance Spot 입금 확인
     DEPOSIT_USDT_CONVERTED: str = "DepositUsdtConverted"  # TRX -> USDT 환전
-    DEPOSIT_COMPLETED: str = "DepositCompleted"  # Futures 이체 완료
+    DEPOSIT_SPOT_TRANSFERRED: str = "DepositSpotTransferred"  # Spot -> Futures 이체
+    DEPOSIT_COMPLETED: str = "DepositCompleted"  # 입금 완료
 
     # Withdraw (Binance Futures USDT -> Upbit KRW)
     WITHDRAW_INITIATED: str = "WithdrawInitiated"  # 출금 요청 시작
     WITHDRAW_FUTURES_TRANSFERRED: str = "WithdrawFuturesTransferred"  # Futures -> Spot 이체
-    WITHDRAW_TRX_PURCHASED: str = "WithdrawTrxPurchased"  # Binance TRX 매수 완료
+    WITHDRAW_USDT_CONVERTED: str = "WithdrawUsdtConverted"  # USDT -> TRX 환전
     WITHDRAW_TRX_SENT: str = "WithdrawTrxSent"  # Binance -> Upbit 전송
     WITHDRAW_TRX_RECEIVED: str = "WithdrawTrxReceived"  # Upbit TRX 입금 확인
     WITHDRAW_KRW_CONVERTED: str = "WithdrawKrwConverted"  # TRX -> KRW 환전
+    WITHDRAW_COMPLETED: str = "WithdrawCompleted"  # 출금 완료
 
     # Reconciliation / Audit
     DRIFT_DETECTED: str = "DriftDetected"

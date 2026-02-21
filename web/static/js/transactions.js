@@ -5,20 +5,13 @@
 let currentSymbol = null;
 let currentLimit = 50;
 let currentOffset = 0;
-let allSymbols = new Set();
+let displaySymbol = null;
 
 document.addEventListener('DOMContentLoaded', () => {
     initTransactions();
 });
 
 function initTransactions() {
-    // 심볼 필터 이벤트
-    document.getElementById('symbol-filter')?.addEventListener('change', (e) => {
-        currentSymbol = e.target.value || null;
-        currentOffset = 0;
-        loadTransactions();
-    });
-    
     // 초기 로드
     loadTransactions();
 }
@@ -27,7 +20,7 @@ async function loadTransactions() {
     const tbody = document.getElementById('transactions-table');
     if (!tbody) return;
     
-    tbody.innerHTML = '<tr><td colspan="6" class="text-center"><div class="spinner-border spinner-border-sm"></div> 로딩 중...</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="5" class="text-center"><div class="spinner-border spinner-border-sm"></div> 로딩 중...</td></tr>';
     
     try {
         const params = {
@@ -42,18 +35,16 @@ async function loadTransactions() {
         const data = await AE.api(`/api/transactions${queryString}`);
         
         if (!data.transactions || data.transactions.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">거래 내역 없음</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">거래 내역 없음</td></tr>';
             updatePaginationInfo(0, currentLimit, currentOffset);
             return;
         }
         
-        // 심볼 목록 수집
-        data.transactions.forEach(tx => {
-            if (tx.symbol) {
-                allSymbols.add(tx.symbol);
-            }
-        });
-        updateSymbolFilter();
+        // 첫 번째 거래의 심볼을 타이틀에 표시
+        if (data.transactions.length > 0 && data.transactions[0].symbol) {
+            displaySymbol = data.transactions[0].symbol;
+            updateSymbolTitle();
+        }
         
         tbody.innerHTML = data.transactions.map(tx => {
             const pnl = AE.formatAmount(tx.realized_pnl || 0);
@@ -62,10 +53,9 @@ async function loadTransactions() {
             return `
                 <tr>
                     <td>${timeStr}</td>
-                    <td><strong>${tx.symbol || '-'}</strong></td>
                     <td class="text-end">${tx.bought_qty || '-'}</td>
                     <td class="text-end">${tx.sold_qty || '-'}</td>
-                    <td class="text-end">${AE.formatNumber(tx.fee_usdt || 0)}</td>
+                    <td class="text-end d-none d-sm-table-cell">${AE.formatCommission(tx.fee_usdt || 0)}</td>
                     <td class="text-end ${pnl.class}">${pnl.text}</td>
                 </tr>
             `;
@@ -76,34 +66,19 @@ async function loadTransactions() {
         
     } catch (error) {
         console.error('Load transactions error:', error);
-        tbody.innerHTML = '<tr><td colspan="6" class="text-center text-danger">로드 실패</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="5" class="text-center text-danger">로드 실패</td></tr>';
     }
 }
 
-function updateSymbolFilter() {
-    const select = document.getElementById('symbol-filter');
-    if (!select) return;
+function updateSymbolTitle() {
+    const symbolTitle = document.getElementById('symbol-title');
+    if (!symbolTitle) return;
     
-    // 현재 선택값 유지
-    const currentValue = select.value;
-    
-    // 기존 옵션 유지하면서 새 심볼 추가
-    const existingOptions = new Set();
-    for (const option of select.options) {
-        existingOptions.add(option.value);
+    if (displaySymbol) {
+        symbolTitle.textContent = `(${displaySymbol})`;
+    } else {
+        symbolTitle.textContent = '';
     }
-    
-    allSymbols.forEach(symbol => {
-        if (!existingOptions.has(symbol)) {
-            const option = document.createElement('option');
-            option.value = symbol;
-            option.textContent = symbol;
-            select.appendChild(option);
-        }
-    });
-    
-    // 선택값 복원
-    select.value = currentValue;
 }
 
 function updatePaginationInfo(total, limit, offset) {

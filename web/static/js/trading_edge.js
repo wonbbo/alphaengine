@@ -4,10 +4,12 @@
 
 let cumulativeEdgeChart = null;
 let symbolPnLChart = null;
+let perTradeEdgeChart = null;
 
 document.addEventListener('DOMContentLoaded', () => {
     loadEdgeSummary();
     loadEdgeChart();
+    loadPerTradeEdgeChart();
 });
 
 async function loadEdgeSummary() {
@@ -31,25 +33,32 @@ async function loadEdgeSummary() {
             `<span class="${avgPnl.class}">${avgPnl.text}</span>`;
         
         const pf = data.profit_factor;
-        const pfClass = pf >= 1.5 ? 'edge-positive' : (pf < 1 ? 'edge-negative' : '');
+        const pfDisplay = (pf === 9999 || pf === Infinity) ? '-' : pf;
+        const pfClass = (pfDisplay !== '-' && pf >= 1.5) ? 'edge-positive' : ((pfDisplay !== '-' && pf < 1) ? 'edge-negative' : '');
         document.getElementById('profit-factor').innerHTML = 
-            `<span class="${pfClass}">${pf === Infinity ? '∞' : pf}</span>`;
+            `<span class="${pfClass}">${pfDisplay}</span>`;
         
         document.getElementById('total-fees').textContent = 
             AE.formatNumber(data.total_fees || 0);
+        
+        // Bootstrap 툴팁 초기화
+        const tooltipTriggerList = document.querySelectorAll('[data-bs-toggle="tooltip"]');
+        tooltipTriggerList.forEach(el => new bootstrap.Tooltip(el));
         
         // 심볼별 테이블
         const symbols = data.symbols || [];
         const tbody = document.getElementById('symbols-table');
         
         if (symbols.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted">데이터 없음</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">데이터 없음</td></tr>';
         } else {
             tbody.innerHTML = symbols.map(s => {
                 const pnl = AE.formatAmount(s.net_pnl || 0);
                 const winRate = s.total_trades > 0 
                     ? Math.round((s.winning_trades || 0) / s.total_trades * 100) 
                     : 0;
+                const te = s.trading_edge || 0;
+                const teClass = te > 0 ? 'text-success' : (te < 0 ? 'text-danger' : '');
                 
                 return `
                     <tr>
@@ -57,6 +66,7 @@ async function loadEdgeSummary() {
                         <td class="text-end">${s.total_trades || 0}</td>
                         <td class="text-end">${winRate}%</td>
                         <td class="text-end ${pnl.class}">${pnl.text}</td>
+                        <td class="text-end ${teClass}">${te.toFixed(2)}</td>
                     </tr>
                 `;
             }).join('');
@@ -128,5 +138,24 @@ async function loadEdgeChart() {
         
     } catch (error) {
         console.error('Load edge chart error:', error);
+    }
+}
+
+async function loadPerTradeEdgeChart() {
+    try {
+        const data = await AE.api('/api/trading-edge/per-trade-series?limit=60&window=20');
+        
+        if (data.labels && data.labels.length > 0) {
+            perTradeEdgeChart = ChartUtils.createPerTradeEdgeChart('per-trade-edge-chart', data);
+            
+            // final_edge 값을 헤더 카드에 표시 (전체 거래 기준)
+            const finalEdge = data.final_edge || 0;
+            const teClass = finalEdge > 0 ? 'edge-positive' : (finalEdge < 0 ? 'edge-negative' : '');
+            document.getElementById('trading-edge').innerHTML = 
+                `<span class="${teClass}">${finalEdge.toFixed(4)}</span>`;
+        }
+        
+    } catch (error) {
+        console.error('Load per-trade edge chart error:', error);
     }
 }

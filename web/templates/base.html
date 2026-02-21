@@ -17,7 +17,11 @@
             <a class="navbar-brand" href="/">
                 <i class="bi bi-currency-exchange"></i> AlphaEngine
             </a>
-            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+            <!-- 모바일: 모드 배지를 토글러 옆에 표시 -->
+            <span class="badge bg-{{ 'danger' if mode == 'PRODUCTION' else 'warning' }} d-lg-none me-2">
+                {{ mode | default('TESTNET') }}
+            </span>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
                 <span class="navbar-toggler-icon"></span>
             </button>
             <div class="collapse navbar-collapse" id="navbarNav">
@@ -44,7 +48,7 @@
                     </li>
                     <li class="nav-item">
                         <a class="nav-link {% if active_page == 'trading_edge' %}active{% endif %}" href="/trading-edge">
-                            <i class="bi bi-bar-chart-line"></i> Trading Edge
+                            <i class="bi bi-bar-chart-line"></i> Edge
                         </a>
                     </li>
                     <li class="nav-item">
@@ -53,10 +57,10 @@
                         </a>
                     </li>
                     <li class="nav-item dropdown">
-                        <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">
                             <i class="bi bi-gear"></i> 관리
                         </a>
-                        <ul class="dropdown-menu">
+                        <ul class="dropdown-menu dropdown-menu-dark">
                             <li>
                                 <a class="dropdown-item {% if active_page == 'events' %}active{% endif %}" href="/events">
                                     <i class="bi bi-journal-text"></i> 이벤트
@@ -69,14 +73,14 @@
                             </li>
                             <li>
                                 <a class="dropdown-item {% if active_page == 'commands' %}active{% endif %}" href="/commands">
-                                    <i class="bi bi-terminal"></i> Commands
+                                    <i class="bi bi-terminal"></i> 명령
                                 </a>
                             </li>
                         </ul>
                     </li>
                 </ul>
-                <!-- 모드 표시 -->
-                <ul class="navbar-nav ms-auto">
+                <!-- 데스크톱: 모드 표시 -->
+                <ul class="navbar-nav ms-auto d-none d-lg-flex">
                     <li class="nav-item">
                         <span class="nav-link">
                             <span class="badge bg-{{ 'danger' if mode == 'PRODUCTION' else 'warning' }}">

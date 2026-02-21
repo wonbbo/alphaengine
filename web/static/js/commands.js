@@ -1,5 +1,7 @@
 /**
- * Commands 페이지
+ * 명령 페이지
+ * 
+ * 이벤트/커맨드 타입 한글화 및 색상은 common.js의 AE._typeConfig 사용
  */
 
 let commandsData = [];
@@ -34,7 +36,7 @@ async function loadCommandTypes() {
             types.forEach(type => {
                 const option = document.createElement('option');
                 option.value = type;
-                option.textContent = type;
+                option.textContent = AE.getCommandTypeOptionText(type);
                 select.appendChild(option);
             });
         }
@@ -63,7 +65,7 @@ async function loadCommands() {
         commandsData = data.commands || [];
         
         if (commandsData.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">Command 없음</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">명령 없음</td></tr>';
             document.getElementById('pagination-info').textContent = '0 건';
             return;
         }
@@ -76,7 +78,7 @@ async function loadCommands() {
             return `
                 <tr>
                     <td>${timeStr}</td>
-                    <td><strong>${cmd.command_type}</strong></td>
+                    <td>${AE.commandTypeBadge(cmd.command_type)}</td>
                     <td>${symbol}</td>
                     <td>${AE.statusBadge(cmd.status)}</td>
                     <td><small class="text-muted">${actor}</small></td>
@@ -115,7 +117,7 @@ async function createCommand() {
     const payloadStr = document.getElementById('command-payload').value;
     
     if (!commandType) {
-        AE.toast('Command 타입을 선택해주세요.', 'warning');
+        AE.toast('명령 타입을 선택해주세요.', 'warning');
         return;
     }
     
@@ -143,7 +145,7 @@ async function createCommand() {
             }),
         });
         
-        AE.toast(`Command 발행됨: ${result.command_id.substring(0, 8)}...`, 'success');
+        AE.toast(`명령 발행됨: ${result.command_id.substring(0, 8)}...`, 'success');
         createModal.hide();
         loadCommands();
         
@@ -157,7 +159,7 @@ function showCommandDetail(index) {
     if (!cmd) return;
     
     document.getElementById('detail-command-id').textContent = cmd.command_id;
-    document.getElementById('detail-command-type').textContent = cmd.command_type;
+    document.getElementById('detail-command-type').innerHTML = `${AE.commandTypeBadge(cmd.command_type)} <small class="text-muted">(${cmd.command_type})</small>`;
     document.getElementById('detail-ts').textContent = AE.formatKST(cmd.ts);
     document.getElementById('detail-status').innerHTML = AE.statusBadge(cmd.status);
     document.getElementById('detail-actor').textContent = cmd.actor 

@@ -10,28 +10,28 @@
 </div>
 
 <!-- 필터 -->
-<div class="filter-form mb-4">
-    <div class="row g-3">
-        <div class="col-md-3">
+<div class="filter-form mb-3 mb-md-4">
+    <div class="row g-2 g-md-3">
+        <div class="col-6 col-md-3">
             <label class="form-label">이벤트 타입</label>
-            <select class="form-select" id="filter-event-type">
+            <select class="form-select form-select-sm" id="filter-event-type">
                 <option value="">전체</option>
             </select>
         </div>
-        <div class="col-md-3">
+        <div class="col-6 col-md-3">
             <label class="form-label">심볼</label>
-            <input type="text" class="form-control" id="filter-symbol" placeholder="BTCUSDT">
+            <input type="text" class="form-control form-control-sm" id="filter-symbol" placeholder="XRPUSDT">
         </div>
-        <div class="col-md-4">
+        <div class="col-12 col-md-4">
             <label class="form-label">기간</label>
-            <div class="input-group">
+            <div class="input-group input-group-sm">
                 <input type="date" class="form-control" id="filter-from-date">
                 <span class="input-group-text">~</span>
                 <input type="date" class="form-control" id="filter-to-date">
             </div>
         </div>
-        <div class="col-md-2 d-flex align-items-end">
-            <button class="btn btn-primary w-100" onclick="applyFilter()">
+        <div class="col-12 col-md-2 d-flex align-items-end">
+            <button class="btn btn-primary btn-sm w-100" onclick="applyFilter()">
                 <i class="bi bi-search"></i> 조회
             </button>
         </div>
@@ -41,14 +41,14 @@
 <div class="card">
     <div class="card-body">
         <div class="table-responsive">
-            <table class="table table-hover table-clickable">
+            <table class="table table-hover table-clickable mb-0">
                 <thead>
                     <tr>
-                        <th style="width: 180px;">시간</th>
-                        <th style="width: 150px;">타입</th>
-                        <th>심볼</th>
-                        <th>Entity</th>
-                        <th>Source</th>
+                        <th>시간</th>
+                        <th>타입</th>
+                        <th class="d-none d-sm-table-cell">심볼</th>
+                        <th class="d-none d-md-table-cell">Entity</th>
+                        <th class="d-none d-lg-table-cell">Source</th>
                     </tr>
                 </thead>
                 <tbody id="events-table">
@@ -81,24 +81,24 @@
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body">
-                <dl class="row">
-                    <dt class="col-sm-3">Event ID</dt>
-                    <dd class="col-sm-9"><code id="modal-event-id">-</code></dd>
+                <dl class="row mb-3">
+                    <dt class="col-4 col-sm-3">Event ID</dt>
+                    <dd class="col-8 col-sm-9"><code id="modal-event-id" class="small text-break">-</code></dd>
                     
-                    <dt class="col-sm-3">타입</dt>
-                    <dd class="col-sm-9" id="modal-event-type">-</dd>
+                    <dt class="col-4 col-sm-3">타입</dt>
+                    <dd class="col-8 col-sm-9" id="modal-event-type">-</dd>
                     
-                    <dt class="col-sm-3">시간</dt>
-                    <dd class="col-sm-9" id="modal-ts">-</dd>
+                    <dt class="col-4 col-sm-3">시간</dt>
+                    <dd class="col-8 col-sm-9" id="modal-ts">-</dd>
                     
-                    <dt class="col-sm-3">심볼</dt>
-                    <dd class="col-sm-9" id="modal-symbol">-</dd>
+                    <dt class="col-4 col-sm-3">심볼</dt>
+                    <dd class="col-8 col-sm-9" id="modal-symbol">-</dd>
                     
-                    <dt class="col-sm-3">Entity</dt>
-                    <dd class="col-sm-9" id="modal-entity">-</dd>
+                    <dt class="col-4 col-sm-3">Entity</dt>
+                    <dd class="col-8 col-sm-9" id="modal-entity">-</dd>
                     
-                    <dt class="col-sm-3">Source</dt>
-                    <dd class="col-sm-9" id="modal-source">-</dd>
+                    <dt class="col-4 col-sm-3">Source</dt>
+                    <dd class="col-8 col-sm-9" id="modal-source">-</dd>
                 </dl>
                 
                 <h6>Payload</h6>

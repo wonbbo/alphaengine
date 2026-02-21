@@ -79,3 +79,25 @@ async def get_daily_edge_series(
     mode = settings.mode.value.upper()
     
     return await service.get_daily_edge_series(mode, days)
+
+
+@router.get("/api/trading-edge/per-trade-series")
+async def get_per_trade_edge_series(
+    limit: int = Query(default=60, ge=10, le=200),
+    window: int = Query(default=20, ge=5, le=50),
+    db: SQLiteAdapter = Depends(get_db),
+    settings: Settings = Depends(get_app_settings),
+):
+    """거래별 Trading Edge 시계열
+    
+    Trading Edge = (승률 × 평균수익) - (패률 × 평균손실)
+    롤링 윈도우 방식으로 계산.
+    
+    Args:
+        limit: 조회할 거래 수 (기본 60)
+        window: Edge 계산에 사용할 롤링 윈도우 크기 (기본 20)
+    """
+    service = TradingEdgeService(db)
+    mode = settings.mode.value.upper()
+    
+    return await service.get_per_trade_edge_series(mode, limit, window)

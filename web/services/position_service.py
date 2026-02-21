@@ -195,3 +195,42 @@ class PositionService:
             }
             for row in rows
         ]
+    
+    async def get_closed_positions(
+        self,
+        mode: str,
+        limit: int = 60,
+    ) -> list[dict[str, Any]]:
+        """청산된 포지션 목록 조회 (시간순)
+        
+        Trading Edge 계산용으로 청산된 포지션만 시간순 조회.
+        
+        Args:
+            mode: TESTNET 또는 PRODUCTION
+            limit: 조회 개수 제한
+            
+        Returns:
+            청산된 포지션 목록 (오래된 것부터)
+        """
+        sql = """
+            SELECT 
+                session_id, symbol, side, 
+                closed_at, realized_pnl
+            FROM position_session
+            WHERE scope_mode = ? AND status = 'CLOSED'
+            ORDER BY closed_at DESC
+            LIMIT ?
+        """
+        rows = await self.db.fetchall(sql, (mode, limit))
+        
+        # 시간순 정렬 (오래된 것부터)
+        return [
+            {
+                "session_id": row[0],
+                "symbol": row[1],
+                "side": row[2],
+                "closed_at": row[3],
+                "realized_pnl": float(row[4]) if row[4] else 0.0,
+            }
+            for row in reversed(rows)
+        ]

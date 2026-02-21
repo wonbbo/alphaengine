@@ -31,10 +31,10 @@ async function loadAssets() {
             
             return `
                 <tr>
-                    <td>${asset.venue || '-'}</td>
+                    <td>${AE.formatVenue(asset.venue)}</td>
                     <td><strong>${asset.asset || '-'}</strong></td>
                     <td class="text-end">${AE.formatNumber(balance, 4)}</td>
-                    <td>${lastUpdated}</td>
+                    <td class="d-none d-sm-table-cell">${lastUpdated}</td>
                 </tr>
             `;
         }).join('');
@@ -82,10 +82,10 @@ async function loadTrialBalance() {
             
             return `
                 <tr>
-                    <td><code>${item.account_id}</code></td>
-                    <td>${item.account_type || '-'}</td>
-                    <td>${item.venue || '-'}</td>
-                    <td>${item.asset || '-'}</td>
+                    <td class="d-none d-md-table-cell"><code>${item.account_id}</code></td>
+                    <td>${AE.formatAccountType(item.account_type)}</td>
+                    <td>${AE.formatVenue(item.venue)}</td>
+                    <td class="d-none d-sm-table-cell">${item.asset || '-'}</td>
                     <td class="text-end ${balanceClass}">${AE.formatNumber(balance, 4)}</td>
                 </tr>
             `;

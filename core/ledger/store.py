@@ -928,20 +928,56 @@ class LedgerStore:
             (scope_mode,),
         )
         
-        return [
-            {
+        results = []
+        for row in rows:
+            total_trades = row[2]
+            winning_trades = row[6]
+            losing_trades = row[7]
+            
+            # 심볼별 Trading Edge 계산 (position_session 기준으로 통일)
+            # Edge = (승률 × 평균수익) - (패률 × 평균손실)
+            edge = 0.0
+            
+            # position_session에서 직접 승/패 및 평균 계산
+            pnl_row = await self.db.fetchone(
+                """
+                SELECT 
+                    COUNT(*) as total,
+                    SUM(CASE WHEN CAST(realized_pnl AS REAL) > 0 THEN 1 ELSE 0 END) as wins,
+                    SUM(CASE WHEN CAST(realized_pnl AS REAL) < 0 THEN 1 ELSE 0 END) as losses,
+                    AVG(CASE WHEN CAST(realized_pnl AS REAL) > 0 THEN CAST(realized_pnl AS REAL) ELSE NULL END) as avg_win,
+                    AVG(CASE WHEN CAST(realized_pnl AS REAL) < 0 THEN ABS(CAST(realized_pnl AS REAL)) ELSE NULL END) as avg_loss
+                FROM position_session
+                WHERE scope_mode = ? AND symbol = ? AND status = 'CLOSED'
+                """,
+                (scope_mode, row[0]),
+            )
+            
+            if pnl_row and pnl_row[0] > 0:
+                ps_total = pnl_row[0]
+                ps_wins = pnl_row[1] or 0
+                ps_losses = pnl_row[2] or 0
+                avg_win = pnl_row[3] or 0
+                avg_loss = pnl_row[4] or 0
+                
+                win_rate = ps_wins / ps_total
+                loss_rate = ps_losses / ps_total
+                edge = (win_rate * avg_win) - (loss_rate * avg_loss)
+            
+            results.append({
                 "symbol": row[0],
                 "scope_mode": row[1],
-                "total_trades": row[2],
+                "total_trades": total_trades,
                 "total_pnl": row[3],
                 "total_fees": row[4],
                 "net_pnl": row[5],
-                "winning_trades": row[6],
-                "losing_trades": row[7],
-                "win_rate": round(row[6] / row[2] * 100, 2) if row[2] > 0 else 0,
-            }
-            for row in rows
-        ]
+                "winning_trades": winning_trades,
+                "losing_trades": losing_trades,
+                "win_rate": round(winning_trades / total_trades * 100, 2) if total_trades > 0 else 0,
+                "trading_edge": round(edge, 4),
+            })
+        
+        return results
     
     async def get_funding_history(
         self,

@@ -10,52 +10,52 @@
 </div>
 
 <!-- 자산 요약 카드 -->
-<div class="row mb-4">
-    <div class="col-md-4">
-        <div class="card stat-card">
+<div class="row mb-3 mb-md-4 g-2 g-md-3">
+    <div class="col-4 col-md-4">
+        <div class="card stat-card h-100">
             <div class="card-body">
                 <div class="stat-label">SPOT</div>
                 <div class="stat-value" id="spot-total">-</div>
-                <div class="text-muted">USDT</div>
+                <div class="text-muted small">USDT</div>
             </div>
         </div>
     </div>
-    <div class="col-md-4">
-        <div class="card stat-card">
+    <div class="col-4 col-md-4">
+        <div class="card stat-card h-100">
             <div class="card-body">
                 <div class="stat-label">FUTURES</div>
                 <div class="stat-value" id="futures-total">-</div>
-                <div class="text-muted">USDT</div>
+                <div class="text-muted small">USDT</div>
             </div>
         </div>
     </div>
-    <div class="col-md-4">
-        <div class="card stat-card">
+    <div class="col-4 col-md-4">
+        <div class="card stat-card h-100">
             <div class="card-body">
                 <div class="stat-label">Total</div>
                 <div class="stat-value text-primary" id="total-assets">-</div>
-                <div class="text-muted">USDT</div>
+                <div class="text-muted small">USDT</div>
             </div>
         </div>
     </div>
 </div>
 
 <!-- 자산 상세 -->
-<div class="row mb-4">
+<div class="row mb-3 mb-md-4">
     <div class="col-12">
         <div class="card">
             <div class="card-header">
-                <i class="bi bi-currency-exchange"></i> Venue별 자산
+                <i class="bi bi-currency-exchange"></i> 계좌별 자산
             </div>
             <div class="card-body">
                 <div class="table-responsive">
-                    <table class="table table-hover">
+                    <table class="table table-hover mb-0">
                         <thead>
                             <tr>
-                                <th>Venue</th>
-                                <th>Asset</th>
+                                <th>계좌</th>
+                                <th>코인</th>
                                 <th class="text-end">잔액</th>
-                                <th>최종 업데이트</th>
+                                <th class="d-none d-sm-table-cell">업데이트</th>
                             </tr>
                         </thead>
                         <tbody id="assets-table">
@@ -75,20 +75,20 @@
     <div class="col-12">
         <div class="card">
             <div class="card-header d-flex justify-content-between align-items-center">
-                <span><i class="bi bi-journal-check"></i> 시산표 (Trial Balance)</span>
+                <span><i class="bi bi-journal-check"></i> <span class="d-none d-sm-inline">계정별 잔액</span><span class="d-sm-none">계정별 잔액</span></span>
                 <button class="btn btn-sm btn-outline-primary" onclick="toggleTrialBalance()">
                     <i class="bi bi-chevron-down" id="trial-balance-icon"></i>
                 </button>
             </div>
             <div class="card-body collapse" id="trial-balance-section">
                 <div class="table-responsive">
-                    <table class="table table-sm">
+                    <table class="table table-sm mb-0">
                         <thead>
                             <tr>
-                                <th>계정 ID</th>
-                                <th>계정 타입</th>
-                                <th>Venue</th>
-                                <th>Asset</th>
+                                <th class="d-none d-md-table-cell">계정 ID</th>
+                                <th>타입</th>
+                                <th>계좌</th>
+                                <th class="d-none d-sm-table-cell">코인</th>
                                 <th class="text-end">잔액</th>
                             </tr>
                         </thead>

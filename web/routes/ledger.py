@@ -56,10 +56,19 @@ async def get_portfolio(
     db: SQLiteAdapter = Depends(get_db),
     settings: Settings = Depends(get_app_settings),
 ):
-    """포트폴리오 현황 (v_portfolio)"""
+    """포트폴리오 현황 (v_portfolio)
+    
+    잔액이 0인 계정 및 UNKNOWN 코인은 제외.
+    """
     store = LedgerStore(db)
     mode = settings.mode.value.upper()
-    return await store.get_portfolio(mode)
+    portfolio = await store.get_portfolio(mode)
+    
+    # 잔액이 0인 계정 및 UNKNOWN 코인 필터링
+    return [
+        p for p in portfolio
+        if (p.get("balance") or 0) != 0 and p.get("asset") != "UNKNOWN"
+    ]
 
 
 @router.get("/recent-trades")
@@ -116,10 +125,19 @@ async def get_trial_balance(
     db: SQLiteAdapter = Depends(get_db),
     settings: Settings = Depends(get_app_settings),
 ):
-    """시산표 조회"""
+    """시산표 조회
+    
+    잔액이 0인 계정은 제외.
+    """
     store = LedgerStore(db)
     mode = settings.mode.value.upper()
-    return await store.get_trial_balance(mode)
+    trial_balance = await store.get_trial_balance(mode)
+    
+    # 잔액이 0인 계정 필터링
+    return [
+        item for item in trial_balance
+        if (item.get("balance") or 0) != 0
+    ]
 
 
 @router.get("/account-ledger/{account_id:path}")

@@ -1,5 +1,7 @@
 /**
  * 이벤트 페이지
+ * 
+ * 이벤트/커맨드 타입 한글화 및 색상은 common.js의 AE._typeConfig 사용
  */
 
 let currentLimit = 50;
@@ -38,7 +40,7 @@ async function loadEventTypes() {
             types.forEach(type => {
                 const option = document.createElement('option');
                 option.value = type;
-                option.textContent = type;
+                option.textContent = AE.getEventTypeOptionText(type);
                 select.appendChild(option);
             });
         }
@@ -97,7 +99,7 @@ async function loadEvents() {
             return `
                 <tr onclick="showEventDetail(${index})" style="cursor: pointer;">
                     <td>${timeStr}</td>
-                    <td><span class="badge event-type-badge bg-info">${event.event_type}</span></td>
+                    <td>${AE.eventTypeBadge(event.event_type)}</td>
                     <td><strong>${symbol}</strong></td>
                     <td><code>${entity}</code></td>
                     <td>${event.source || '-'}</td>
@@ -119,7 +121,7 @@ function showEventDetail(index) {
     if (!event) return;
     
     document.getElementById('modal-event-id').textContent = event.event_id;
-    document.getElementById('modal-event-type').innerHTML = AE.statusBadge(event.event_type);
+    document.getElementById('modal-event-type').innerHTML = `${AE.eventTypeBadge(event.event_type)} <small class="text-muted">(${event.event_type})</small>`;
     document.getElementById('modal-ts').textContent = AE.formatKST(event.ts);
     document.getElementById('modal-symbol').textContent = event.scope?.symbol || '-';
     document.getElementById('modal-entity').textContent = event.entity_kind 

@@ -6,6 +6,36 @@
     --ae-danger: #dc3545;
     --ae-warning: #ffc107;
     --ae-info: #0dcaf0;
+    --ae-purple: #6f42c1;
+}
+
+/* 커스텀 배지 색상 */
+.bg-purple {
+    background-color: var(--ae-purple) !important;
+    color: white;
+}
+
+.bg-system {
+    background-color: #6c757d !important;
+    color: white;
+}
+
+.bg-external {
+    background-color: #20c997 !important;
+    color: white;
+}
+
+/* 이벤트/커맨드 타입 카테고리 색상 */
+.bg-orange {
+    background-color: #fd7e14 !important;
+}
+
+.bg-indigo {
+    background-color: #6610f2 !important;
+}
+
+.bg-gold {
+    background-color: #ffc107 !important;
 }
 
 body {
@@ -224,7 +254,7 @@ main {
 }
 
 .position-header.short {
-    background: linear-gradient(135deg, #eb3349 0%, #f45c43 100%);
+    background: linear-gradient(135deg, #8b4557 0%, #c97070 100%);
 }
 
 .position-timeline {
@@ -304,10 +334,60 @@ main {
     border-color: var(--ae-primary);
 }
 
+.config-card.border-secondary {
+    opacity: 0.8;
+}
+
 .config-key {
     font-family: 'Monaco', 'Menlo', monospace;
     font-size: 0.875rem;
     color: #6c757d;
+}
+
+/* 설정 편집 필드 */
+.config-field {
+    padding: 0.75rem;
+    border-radius: 0.375rem;
+    background-color: #f8f9fa;
+    margin-bottom: 0.75rem;
+}
+
+.config-field:hover {
+    background-color: #e9ecef;
+}
+
+.config-field label {
+    margin-bottom: 0.5rem;
+}
+
+.config-field code {
+    font-size: 0.9rem;
+    color: #495057;
+}
+
+.config-field .form-control.border-warning,
+.config-field .form-check-input.border-warning {
+    border-color: var(--ae-warning) !important;
+    box-shadow: 0 0 0 0.1rem rgba(255, 193, 7, 0.25);
+}
+
+.config-field .form-control.is-valid {
+    border-color: var(--ae-success);
+}
+
+.config-field .form-control.is-invalid {
+    border-color: var(--ae-danger);
+}
+
+/* JSON 모드 토글 */
+#json-mode-toggle + label {
+    cursor: pointer;
+    user-select: none;
+}
+
+/* 변경 표시 */
+#changes-indicator {
+    animation: pulse 1.5s infinite;
 }
 
 /* ===== 이벤트 페이지 ===== */
@@ -342,7 +422,7 @@ main {
     color: var(--ae-danger);
 }
 
-/* ===== 반응형 ===== */
+/* ===== 반응형 - 태블릿 (768px 이하) ===== */
 @media (max-width: 768px) {
     .stat-card .stat-value {
         font-size: 1.5rem;
@@ -366,5 +446,409 @@ main {
     
     .edge-stat .value {
         font-size: 1.5rem;
+    }
+    
+    /* 필터 폼 레이아웃 */
+    .filter-form .row {
+        gap: 0.5rem;
+    }
+    
+    /* 모달 풀스크린 */
+    .modal-dialog {
+        margin: 0.5rem;
+        max-width: calc(100% - 1rem);
+    }
+    
+    .modal-lg {
+        max-width: calc(100% - 1rem);
+    }
+}
+
+/* ===== 반응형 - 모바일 (576px 이하) ===== */
+@media (max-width: 576px) {
+    /* 컨테이너 패딩 축소 */
+    .container-fluid {
+        padding-left: 0.75rem;
+        padding-right: 0.75rem;
+    }
+    
+    main.container-fluid {
+        padding-top: 1rem;
+        padding-bottom: 1rem;
+    }
+    
+    /* 네비게이션 */
+    .navbar-brand {
+        font-size: 1rem;
+    }
+    
+    .navbar-nav .nav-link {
+        padding: 0.75rem 1rem;
+        border-bottom: 1px solid rgba(255,255,255,0.1);
+    }
+    
+    .navbar .badge {
+        font-size: 0.65rem;
+    }
+    
+    /* 페이지 타이틀 */
+    h2 {
+        font-size: 1.25rem;
+    }
+    
+    h2 i {
+        font-size: 1rem;
+    }
+    
+    /* 통계 카드 */
+    .stat-card .stat-value {
+        font-size: 1.25rem;
+    }
+    
+    .stat-card .stat-label {
+        font-size: 0.75rem;
+    }
+    
+    .stat-card .card-body {
+        padding: 0.875rem;
+    }
+    
+    /* Edge 통계 */
+    .edge-stat {
+        padding: 0.75rem 0.5rem;
+    }
+    
+    .edge-stat .value {
+        font-size: 1.1rem;
+    }
+    
+    .edge-stat .label {
+        font-size: 0.7rem;
+    }
+    
+    /* 카드 */
+    .card {
+        border-radius: 0.375rem;
+    }
+    
+    .card-body {
+        padding: 0.75rem;
+    }
+    
+    .card-header {
+        padding: 0.625rem 0.75rem;
+        font-size: 0.875rem;
+    }
+    
+    .card-header h5 {
+        font-size: 0.875rem;
+        margin-bottom: 0;
+    }
+    
+    /* 테이블 */
+    .table-responsive {
+        font-size: 0.75rem;
+        margin: -0.75rem;
+        padding: 0.75rem;
+    }
+    
+    .table th, 
+    .table td {
+        padding: 0.5rem 0.375rem;
+        white-space: nowrap;
+    }
+    
+    .table th:first-child,
+    .table td:first-child {
+        padding-left: 0.5rem;
+    }
+    
+    /* 테이블 모바일 숨김 컬럼 */
+    .d-mobile-none {
+        display: none !important;
+    }
+    
+    /* 차트 */
+    .chart-container {
+        height: 200px;
+    }
+    
+    .chart-container-lg {
+        height: 280px;
+    }
+    
+    /* 버튼 그룹 */
+    .btn-group .btn {
+        padding: 0.375rem 0.5rem;
+        font-size: 0.75rem;
+    }
+    
+    /* 필터 버튼 그룹 */
+    .col-12 > .btn-group {
+        width: 100%;
+        margin-top: 0.5rem;
+    }
+    
+    .col-12 > .btn-group .btn {
+        flex: 1;
+    }
+    
+    /* 필터 폼 */
+    .filter-form {
+        padding: 0.75rem;
+    }
+    
+    .filter-form .form-label {
+        font-size: 0.75rem;
+    }
+    
+    .filter-form .form-control,
+    .filter-form .form-select {
+        font-size: 0.875rem;
+        padding: 0.375rem 0.5rem;
+    }
+    
+    .filter-form .btn {
+        font-size: 0.875rem;
+        padding: 0.5rem;
+    }
+    
+    /* 페이지네이션 */
+    .pagination {
+        flex-wrap: wrap;
+        gap: 0.25rem;
+    }
+    
+    .pagination .page-link {
+        padding: 0.375rem 0.625rem;
+        font-size: 0.75rem;
+    }
+    
+    .pagination-info {
+        font-size: 0.75rem;
+        margin-bottom: 0.5rem;
+    }
+    
+    .d-flex.justify-content-between.align-items-center.mt-3 {
+        flex-direction: column;
+        align-items: flex-start !important;
+        gap: 0.5rem;
+    }
+    
+    /* 모달 */
+    .modal-dialog {
+        margin: 0;
+        max-width: 100%;
+        height: 100%;
+    }
+    
+    .modal-content {
+        border-radius: 0;
+        height: 100%;
+        border: none;
+    }
+    
+    .modal-body {
+        overflow-y: auto;
+    }
+    
+    .modal-body dl.row dt,
+    .modal-body dl.row dd {
+        font-size: 0.875rem;
+    }
+    
+    .modal-body dl.row dt {
+        margin-bottom: 0.25rem;
+    }
+    
+    .json-viewer {
+        font-size: 0.7rem;
+        padding: 0.75rem;
+    }
+    
+    /* 포지션 헤더 */
+    .position-header {
+        padding: 1rem;
+    }
+    
+    .position-header h3 {
+        font-size: 1.25rem;
+    }
+    
+    .position-header .fs-4 {
+        font-size: 1.1rem !important;
+    }
+    
+    /* 푸터 */
+    footer .container {
+        font-size: 0.7rem;
+    }
+    
+    footer.py-3 {
+        padding: 0.5rem !important;
+    }
+    
+    /* breadcrumb */
+    .breadcrumb {
+        font-size: 0.875rem;
+        margin-bottom: 0.5rem;
+    }
+    
+    /* 알림 */
+    .alert {
+        font-size: 0.875rem;
+        padding: 0.75rem;
+    }
+    
+    /* 입출금 폼 */
+    .input-group-text {
+        font-size: 0.875rem;
+        padding: 0.375rem 0.5rem;
+    }
+    
+    /* 진행 상태 섹션 */
+    #progress-section .row.text-center .col {
+        padding: 0.25rem;
+    }
+    
+    #progress-section .fw-bold {
+        font-size: 0.875rem;
+    }
+    
+    /* 타임라인 */
+    .position-timeline {
+        padding-left: 1.5rem;
+    }
+    
+    .position-timeline-item::before {
+        left: -1.25rem;
+        width: 0.625rem;
+        height: 0.625rem;
+    }
+}
+
+/* ===== 초소형 모바일 (400px 이하) ===== */
+@media (max-width: 400px) {
+    .stat-card .stat-value {
+        font-size: 1rem;
+    }
+    
+    .edge-stat .value {
+        font-size: 0.95rem;
+    }
+    
+    .edge-stat .label {
+        font-size: 0.65rem;
+    }
+    
+    .table-responsive {
+        font-size: 0.7rem;
+    }
+    
+    .btn {
+        font-size: 0.8rem;
+    }
+    
+    h2 {
+        font-size: 1.1rem;
+    }
+}
+
+/* ===== 터치 친화적 요소 ===== */
+@media (hover: none) and (pointer: coarse) {
+    .btn {
+        min-height: 44px;
+        min-width: 44px;
+    }
+    
+    .nav-link {
+        min-height: 44px;
+        display: flex;
+        align-items: center;
+    }
+    
+    .dropdown-item {
+        padding: 0.75rem 1rem;
+        min-height: 44px;
+    }
+    
+    .form-control,
+    .form-select {
+        min-height: 44px;
+    }
+    
+    .page-link {
+        min-height: 44px;
+        min-width: 44px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+    
+    .table-clickable tbody tr {
+        cursor: pointer;
+    }
+    
+    .table-clickable tbody tr:active {
+        background-color: rgba(13, 110, 253, 0.1);
+    }
+}
+
+/* ===== 모바일 유틸리티 클래스 ===== */
+/* 모바일에서 숨김 */
+@media (max-width: 576px) {
+    .hide-mobile {
+        display: none !important;
+    }
+}
+
+/* 모바일에서만 표시 */
+.show-mobile {
+    display: none !important;
+}
+
+@media (max-width: 576px) {
+    .show-mobile {
+        display: block !important;
+    }
+    
+    .show-mobile-inline {
+        display: inline !important;
+    }
+    
+    .show-mobile-flex {
+        display: flex !important;
+    }
+}
+
+/* 모바일에서 풀너비 */
+@media (max-width: 576px) {
+    .w-mobile-100 {
+        width: 100% !important;
+    }
+    
+    .mb-mobile-2 {
+        margin-bottom: 0.5rem !important;
+    }
+    
+    .mb-mobile-3 {
+        margin-bottom: 1rem !important;
+    }
+}
+
+/* 모바일 헤더 레이아웃 */
+@media (max-width: 576px) {
+    .page-header-mobile {
+        flex-direction: column;
+        align-items: flex-start !important;
+        gap: 0.75rem;
+    }
+    
+    .page-header-mobile > * {
+        width: 100%;
+    }
+    
+    .page-header-mobile .btn-group {
+        justify-content: flex-start;
     }
 }

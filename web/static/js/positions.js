@@ -55,7 +55,7 @@ async function loadPositions() {
     const tbody = document.getElementById('positions-table');
     if (!tbody) return;
     
-    tbody.innerHTML = '<tr><td colspan="9" class="text-center"><div class="spinner-border spinner-border-sm"></div> 로딩 중...</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="8" class="text-center"><div class="spinner-border spinner-border-sm"></div> 로딩 중...</td></tr>';
     
     try {
         const params = {
@@ -70,9 +70,18 @@ async function loadPositions() {
         const data = await AE.api(`/api/positions${queryString}`);
         
         if (!data.positions || data.positions.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="9" class="text-center text-muted">포지션 없음</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted">포지션 없음</td></tr>';
             updatePaginationInfo(0, currentLimit, currentOffset);
             return;
+        }
+        
+        // 첫 번째 포지션에서 심볼을 추출하여 타이틀에 표시
+        const firstSymbol = data.positions[0]?.symbol;
+        if (firstSymbol) {
+            const titleEl = document.getElementById('page-title');
+            if (titleEl) {
+                titleEl.innerHTML = `<i class="bi bi-graph-up-arrow"></i> 포지션 히스토리 (${firstSymbol})`;
+            }
         }
         
         tbody.innerHTML = data.positions.map(pos => {
@@ -84,14 +93,13 @@ async function loadPositions() {
             return `
                 <tr onclick="window.location.href='/positions/${pos.session_id}'" style="cursor: pointer;">
                     <td>${openedAt}</td>
-                    <td>${closedAt}</td>
-                    <td><strong>${pos.symbol}</strong></td>
+                    <td class="d-none d-md-table-cell">${closedAt}</td>
                     <td>${AE.statusBadge(pos.side)}</td>
-                    <td>${AE.statusBadge(pos.status)}</td>
-                    <td class="text-end">${pos.max_qty || '-'}</td>
+                    <td class="d-none d-sm-table-cell">${AE.statusBadge(pos.status)}</td>
+                    <td class="text-end d-none d-lg-table-cell">${pos.max_qty || '-'}</td>
                     <td class="text-end ${pnl.class}">${pnl.text}</td>
-                    <td class="text-end ${cumPnl.class}">${cumPnl.text}</td>
-                    <td class="text-center">${pos.trade_count || 0}</td>
+                    <td class="text-end d-none d-md-table-cell ${cumPnl.class}">${cumPnl.text}</td>
+                    <td class="text-center d-none d-sm-table-cell">${pos.trade_count || 0}</td>
                 </tr>
             `;
         }).join('');
@@ -101,7 +109,7 @@ async function loadPositions() {
         
     } catch (error) {
         console.error('Load positions error:', error);
-        tbody.innerHTML = '<tr><td colspan="9" class="text-center text-danger">로드 실패</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="8" class="text-center text-danger">로드 실패</td></tr>';
     }
 }
 
@@ -205,7 +213,7 @@ async function loadPositionDetail(sessionId) {
         document.getElementById('detail-initial-qty').textContent = data.initial_qty || '-';
         document.getElementById('detail-max-qty').textContent = data.max_qty || '-';
         document.getElementById('detail-trade-count').textContent = data.trade_count || 0;
-        document.getElementById('detail-commission').textContent = `${AE.formatNumber(data.total_commission)} USDT`;
+        document.getElementById('detail-commission').textContent = `${AE.formatCommission(data.total_commission)} USDT`;
         document.getElementById('detail-close-reason').textContent = data.close_reason || '-';
         
     } catch (error) {
@@ -231,16 +239,17 @@ async function loadPositionTrades(sessionId) {
         tbody.innerHTML = trades.map(trade => {
             const pnl = AE.formatAmount(trade.realized_pnl || 0);
             const timeStr = AE.formatKST(trade.created_at);
+            const actionDisplay = trade.action === 'BUY' ? 'LONG' : (trade.action === 'SELL' ? 'SHORT' : trade.action);
             
             return `
                 <tr>
                     <td>${timeStr}</td>
-                    <td>${AE.statusBadge(trade.action)}</td>
+                    <td>${AE.statusBadge(actionDisplay)}</td>
                     <td class="text-end">${trade.qty || '-'}</td>
-                    <td class="text-end">${AE.formatNumber(trade.price)}</td>
+                    <td class="text-end d-none d-sm-table-cell">${AE.formatPrice(trade.price)}</td>
                     <td class="text-end ${pnl.class}">${pnl.text}</td>
-                    <td class="text-end">${AE.formatNumber(trade.commission)}</td>
-                    <td class="text-end">${trade.position_qty_after || '0'}</td>
+                    <td class="text-end d-none d-md-table-cell">${AE.formatCommission(trade.commission)}</td>
+                    <td class="text-end d-none d-lg-table-cell">${trade.position_qty_after || '0'}</td>
                 </tr>
             `;
         }).join('');
@@ -260,7 +269,7 @@ async function loadPositionTrades(sessionId) {
                     <div class="d-flex justify-content-between">
                         <div>
                             <strong>${trade.action}</strong>
-                            <span class="text-muted ms-2">${trade.qty} @ ${AE.formatNumber(trade.price)}</span>
+                            <span class="text-muted ms-2">${trade.qty} @ ${AE.formatPrice(trade.price)}</span>
                         </div>
                         <small class="text-muted">${timeStr}</small>
                     </div>

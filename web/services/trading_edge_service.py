@@ -8,6 +8,7 @@ from typing import Any
 
 from adapters.db.sqlite_adapter import SQLiteAdapter
 from core.ledger.store import LedgerStore
+from web.services.position_service import PositionService
 
 
 class TradingEdgeService:
@@ -19,6 +20,7 @@ class TradingEdgeService:
     def __init__(self, db: SQLiteAdapter):
         self.db = db
         self.ledger_store = LedgerStore(db)
+        self.position_service = PositionService(db)
     
     async def get_symbol_performance(self, mode: str) -> list[dict[str, Any]]:
         """심볼별 성과 조회
@@ -183,3 +185,69 @@ class TradingEdgeService:
             
         except Exception:
             return 0.0
+    
+    async def get_per_trade_edge_series(
+        self,
+        mode: str,
+        limit: int = 60,
+        window: int = 20,
+    ) -> dict[str, Any]:
+        """거래별 Trading Edge 시계열
+        
+        Trading Edge = (승률 × 평균수익) - (패률 × 평균손실)
+        누적 방식으로 계산 (처음부터 현재 거래까지의 모든 데이터 사용).
+        
+        Args:
+            mode: TESTNET 또는 PRODUCTION
+            limit: 조회할 거래 수
+            window: 미사용 (하위 호환성 유지)
+            
+        Returns:
+            labels, edges, pnls, final_edge 포함 차트 데이터
+        """
+        positions = await self.position_service.get_closed_positions(mode, limit)
+        
+        if not positions:
+            return {"labels": [], "edges": [], "pnls": [], "final_edge": 0}
+        
+        labels = []
+        edges = []
+        pnls = []
+        
+        for i, pos in enumerate(positions):
+            # 처음부터 현재 거래까지 모든 데이터 사용 (누적 방식)
+            cumulative_positions = positions[:i + 1]
+            
+            # 승/패 분류
+            wins = [p["realized_pnl"] for p in cumulative_positions if p["realized_pnl"] > 0]
+            losses = [p["realized_pnl"] for p in cumulative_positions if p["realized_pnl"] < 0]
+            
+            total_trades = len(cumulative_positions)
+            win_count = len(wins)
+            loss_count = len(losses)
+            
+            # 승률, 패률
+            win_rate = win_count / total_trades if total_trades > 0 else 0
+            loss_rate = loss_count / total_trades if total_trades > 0 else 0
+            
+            # 평균 수익, 평균 손실
+            avg_win = sum(wins) / win_count if win_count > 0 else 0
+            avg_loss = abs(sum(losses) / loss_count) if loss_count > 0 else 0
+            
+            # Trading Edge 계산
+            edge = (win_rate * avg_win) - (loss_rate * avg_loss)
+            
+            # 라벨: 거래 번호
+            labels.append(f"#{i + 1}")
+            edges.append(round(edge, 4))
+            pnls.append(pos["realized_pnl"])
+        
+        # 마지막 Edge 값 (전체 거래 기준)
+        final_edge = edges[-1] if edges else 0
+        
+        return {
+            "labels": labels,
+            "edges": edges,
+            "pnls": pnls,
+            "final_edge": final_edge,
+        }

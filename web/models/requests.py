@@ -75,7 +75,7 @@ class ConfigUpdateRequest(BaseModel):
             "examples": [
                 {
                     "value": {
-                        "trading": {"symbol": "BTCUSDT"},
+                        "trading": {"symbol": "XRPUSDT"},
                         "strategy": {"name": "sma_cross", "params": {"fast": 10, "slow": 20}},
                     },
                     "expected_version": 1,

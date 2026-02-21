@@ -117,7 +117,7 @@ async function loadAssets() {
             
             return `
                 <tr>
-                    <td>${asset.venue || '-'}</td>
+                    <td>${AE.formatVenue(asset.venue)}</td>
                     <td>${asset.asset || '-'}</td>
                     <td class="text-end">${AE.formatNumber(balance, 4)}</td>
                 </tr>
@@ -156,7 +156,7 @@ async function loadDashboardData() {
                     </div>
                     <div class="col-6">
                         <small class="text-muted">진입가</small>
-                        <div>${AE.formatNumber(pos.entry_price)}</div>
+                        <div>${AE.formatPrice(pos.entry_price)}</div>
                     </div>
                     <div class="col-6 mt-2">
                         <small class="text-muted">미실현 PnL</small>
@@ -194,12 +194,15 @@ async function loadRecentTrades() {
         tradesBody.innerHTML = trades.map(trade => {
             const pnl = AE.formatAmount(trade.realized_pnl || 0);
             const timeStr = trade.ts ? AE.formatKST(trade.ts).substring(11, 19) : '-';
+            const qty = trade.qty || trade.bought_qty || trade.sold_qty || '-';
+            const side = trade.side || '-';
+            const sideDisplay = side === 'BUY' ? 'LONG' : (side === 'SELL' ? 'SHORT' : side);
             
             return `
                 <tr>
                     <td>${timeStr}</td>
-                    <td>${trade.symbol || '-'}</td>
-                    <td class="text-end">${trade.bought_qty || trade.sold_qty || '-'}</td>
+                    <td>${AE.statusBadge(sideDisplay)}</td>
+                    <td class="text-end">${qty}</td>
                     <td class="text-end ${pnl.class}">${pnl.text}</td>
                 </tr>
             `;

@@ -276,6 +276,92 @@ const ChartUtils = {
     },
     
     /**
+     * 거래별 Trading Edge Line Chart 생성
+     */
+    createPerTradeEdgeChart(canvasId, data) {
+        const ctx = document.getElementById(canvasId).getContext('2d');
+        
+        return new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: data.labels,
+                datasets: [
+                    {
+                        label: 'Trading Edge',
+                        data: data.edges,
+                        borderColor: this.colors.primary,
+                        backgroundColor: 'rgba(13, 110, 253, 0.1)',
+                        fill: true,
+                        tension: 0.2,
+                        yAxisID: 'y',
+                    },
+                    {
+                        label: 'PnL',
+                        data: data.pnls,
+                        type: 'bar',
+                        backgroundColor: data.pnls.map(v => 
+                            parseFloat(v) >= 0 ? 'rgba(25, 135, 84, 0.6)' : 'rgba(220, 53, 69, 0.6)'
+                        ),
+                        yAxisID: 'y1',
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                interaction: {
+                    mode: 'index',
+                    intersect: false,
+                },
+                plugins: {
+                    legend: { 
+                        display: true,
+                        position: 'top',
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: (ctx) => {
+                                if (ctx.dataset.label === 'Trading Edge') {
+                                    return `Edge: ${ctx.parsed.y.toFixed(4)}`;
+                                } else {
+                                    return `PnL: ${ctx.parsed.y >= 0 ? '+' : ''}${ctx.parsed.y.toFixed(4)} USDT`;
+                                }
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    y: {
+                        type: 'linear',
+                        display: true,
+                        position: 'left',
+                        title: {
+                            display: true,
+                            text: 'Edge'
+                        },
+                        grid: { color: 'rgba(0,0,0,0.1)' }
+                    },
+                    y1: {
+                        type: 'linear',
+                        display: true,
+                        position: 'right',
+                        title: {
+                            display: true,
+                            text: 'PnL (USDT)'
+                        },
+                        grid: {
+                            drawOnChartArea: false,
+                        },
+                    },
+                    x: {
+                        grid: { display: false }
+                    }
+                }
+            }
+        });
+    },
+    
+    /**
      * 차트 업데이트
      */
     updateChart(chart, labels, values) {

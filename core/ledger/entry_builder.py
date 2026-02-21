@@ -169,7 +169,7 @@ class JournalEntryBuilder:
         realized_pnl = Decimal(str(payload.get("realized_pnl", "0")))
         is_maker = payload.get("is_maker", False)
         
-        # Base/Quote asset 추출 (예: BTCUSDT -> BTC, USDT)
+        # Base/Quote asset 추출 (예: XRPUSDT -> XRP, USDT)
         quote_asset = "USDT"
         base_asset = symbol.replace(quote_asset, "") if symbol else "UNKNOWN"
         
@@ -757,7 +757,7 @@ class JournalEntryBuilder:
         WebSocket 등에서 실시간 시세를 받아 설정.
         
         Args:
-            symbol: 심볼 (예: "BTCUSDT")
+            symbol: 심볼 (예: "XRPUSDT")
             price: 현재 가격
         """
         self._price_cache[symbol] = price

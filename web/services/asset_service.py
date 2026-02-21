@@ -46,6 +46,12 @@ class AssetService:
         """
         portfolio = await self.ledger_store.get_portfolio(mode)
         
+        # 잔액이 0인 계정 및 UNKNOWN 코인 필터링
+        portfolio = [
+            p for p in portfolio
+            if (p.get("balance") or 0) != 0 and p.get("asset") != "UNKNOWN"
+        ]
+        
         # Venue별 USDT 합계
         spot_total = sum(
             p["balance"] or 0
@@ -72,6 +78,12 @@ class AssetService:
             mode: TESTNET 또는 PRODUCTION
             
         Returns:
-            계정별 잔액
+            계정별 잔액 (잔액이 0인 계정 제외)
         """
-        return await self.ledger_store.get_trial_balance(mode)
+        trial_balance = await self.ledger_store.get_trial_balance(mode)
+        
+        # 잔액이 0인 계정 필터링
+        return [
+            item for item in trial_balance
+            if (item.get("balance") or 0) != 0
+        ]

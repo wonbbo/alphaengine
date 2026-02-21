@@ -5,7 +5,7 @@
 {% block content %}
 <div class="row">
     <div class="col-12">
-        <h2 class="mb-4"><i class="bi bi-arrow-left-right"></i> 입출금 관리</h2>
+        <h2 class="mb-3 mb-md-4"><i class="bi bi-arrow-left-right"></i> 입출금 관리</h2>
     </div>
 </div>
 
@@ -18,12 +18,12 @@
     </div>
 </div>
 
-<div class="row">
+<div class="row g-2 g-md-3">
     <!-- 입금 카드 -->
-    <div class="col-md-6 mb-4">
+    <div class="col-12 col-md-6 mb-2 mb-md-4">
         <div class="card h-100">
             <div class="card-header bg-success text-white">
-                <h5 class="mb-0"><i class="bi bi-box-arrow-in-down"></i> 입금 (Upbit → Binance)</h5>
+                <h5 class="mb-0"><i class="bi bi-box-arrow-in-down"></i> <span class="d-none d-sm-inline">입금 (Upbit → Binance)</span><span class="d-sm-none">입금</span></h5>
             </div>
             <div class="card-body">
                 <div id="deposit-status" class="mb-3">
@@ -64,10 +64,10 @@
     </div>
 
     <!-- 출금 카드 -->
-    <div class="col-md-6 mb-4">
+    <div class="col-12 col-md-6 mb-2 mb-md-4">
         <div class="card h-100">
             <div class="card-header bg-danger text-white">
-                <h5 class="mb-0"><i class="bi bi-box-arrow-up"></i> 출금 (Binance → Upbit)</h5>
+                <h5 class="mb-0"><i class="bi bi-box-arrow-up"></i> <span class="d-none d-sm-inline">출금 (Binance → Upbit)</span><span class="d-sm-none">출금</span></h5>
             </div>
             <div class="card-body">
                 <div id="withdraw-status" class="mb-3">
@@ -114,32 +114,32 @@
 
 <!-- 이체 진행 상태 -->
 <div class="row" id="progress-section" style="display: none;">
-    <div class="col-12 mb-4">
+    <div class="col-12 mb-3 mb-md-4">
         <div class="card">
             <div class="card-header">
-                <h5 class="mb-0"><i class="bi bi-hourglass-split"></i> 이체 진행 상태</h5>
+                <h5 class="mb-0"><i class="bi bi-hourglass-split"></i> 이체 진행</h5>
             </div>
             <div class="card-body">
                 <div class="d-flex justify-content-between align-items-center mb-3">
                     <span id="progress-type" class="badge bg-primary">입금</span>
                     <span id="progress-status" class="badge bg-info">진행중</span>
                 </div>
-                <div class="progress mb-3" style="height: 25px;">
+                <div class="progress mb-3" style="height: 20px;">
                     <div id="progress-bar" class="progress-bar progress-bar-striped progress-bar-animated" 
                          role="progressbar" style="width: 0%;">0%</div>
                 </div>
-                <div class="row text-center">
-                    <div class="col">
-                        <small class="text-muted">요청 금액</small>
-                        <div id="progress-amount" class="fw-bold">-</div>
+                <div class="row text-center g-2">
+                    <div class="col-4">
+                        <small class="text-muted d-block" style="font-size: 0.7rem;">요청 금액</small>
+                        <div id="progress-amount" class="fw-bold small">-</div>
                     </div>
-                    <div class="col">
-                        <small class="text-muted">현재 단계</small>
-                        <div id="progress-step" class="fw-bold">0 / 6</div>
+                    <div class="col-4">
+                        <small class="text-muted d-block" style="font-size: 0.7rem;">현재 단계</small>
+                        <div id="progress-step" class="fw-bold small">0 / 6</div>
                     </div>
-                    <div class="col">
-                        <small class="text-muted">이체 ID</small>
-                        <div id="progress-id" class="fw-bold text-truncate" style="max-width: 150px;">-</div>
+                    <div class="col-4">
+                        <small class="text-muted d-block" style="font-size: 0.7rem;">이체 ID</small>
+                        <div id="progress-id" class="fw-bold small text-truncate">-</div>
                     </div>
                 </div>
                 <div class="mt-3 text-center">
@@ -164,16 +164,16 @@
             </div>
             <div class="card-body">
                 <div class="table-responsive">
-                    <table class="table table-hover">
+                    <table class="table table-hover mb-0">
                         <thead>
                             <tr>
-                                <th>이체 ID</th>
+                                <th class="d-none d-md-table-cell">ID</th>
                                 <th>유형</th>
-                                <th>요청 금액</th>
-                                <th>실제 금액</th>
+                                <th class="text-end">요청</th>
+                                <th class="text-end d-none d-sm-table-cell">실제</th>
                                 <th>상태</th>
-                                <th>요청 시각</th>
-                                <th>완료 시각</th>
+                                <th class="d-none d-lg-table-cell">요청 시각</th>
+                                <th class="d-none d-md-table-cell">완료</th>
                             </tr>
                         </thead>
                         <tbody id="history-table">

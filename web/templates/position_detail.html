@@ -5,12 +5,9 @@
 {% block content %}
 <div class="row mb-4">
     <div class="col-12">
-        <nav aria-label="breadcrumb">
-            <ol class="breadcrumb">
-                <li class="breadcrumb-item"><a href="/positions">포지션 히스토리</a></li>
-                <li class="breadcrumb-item active">{{ session_id[:8] }}...</li>
-            </ol>
-        </nav>
+        <a href="/positions" class="btn btn-outline-secondary rounded-circle" title="포지션 히스토리로 돌아가기" style="width: 40px; height: 40px; display: flex; align-items: center; justify-content: center;">
+            <i class="bi bi-arrow-left"></i>
+        </a>
     </div>
 </div>
 
@@ -29,15 +26,15 @@
     </div>
 </div>
 
-<div class="row">
+<div class="row g-2 g-md-3">
     <!-- 포지션 요약 -->
-    <div class="col-md-4 mb-4">
-        <div class="card">
+    <div class="col-12 col-md-4 mb-2 mb-md-4">
+        <div class="card h-100">
             <div class="card-header">
                 <i class="bi bi-info-circle"></i> 포지션 요약
             </div>
             <div class="card-body">
-                <dl class="row mb-0">
+                <dl class="row mb-0 small">
                     <dt class="col-6">진입 시간</dt>
                     <dd class="col-6" id="detail-opened-at">-</dd>
                     
@@ -64,23 +61,23 @@
     </div>
     
     <!-- 거래 내역 -->
-    <div class="col-md-8 mb-4">
-        <div class="card">
+    <div class="col-12 col-md-8 mb-2 mb-md-4">
+        <div class="card h-100">
             <div class="card-header">
                 <i class="bi bi-list-ul"></i> 거래 내역
             </div>
             <div class="card-body">
                 <div class="table-responsive">
-                    <table class="table table-sm">
+                    <table class="table table-sm mb-0">
                         <thead>
                             <tr>
                                 <th>시간</th>
-                                <th>Action</th>
+                                <th>방향</th>
                                 <th class="text-end">수량</th>
-                                <th class="text-end">가격</th>
+                                <th class="text-end d-none d-sm-table-cell">가격</th>
                                 <th class="text-end">PnL</th>
-                                <th class="text-end">수수료</th>
-                                <th class="text-end">잔여</th>
+                                <th class="text-end d-none d-md-table-cell">수수료</th>
+                                <th class="text-end d-none d-lg-table-cell">잔여</th>
                             </tr>
                         </thead>
                         <tbody id="trades-table">
@@ -103,7 +100,7 @@
                 <i class="bi bi-clock-history"></i> 타임라인
             </div>
             <div class="card-body">
-                <div class="position-timeline" id="timeline">
+                <div class="position-timeline small" id="timeline">
                     <div class="text-center text-muted">로딩 중...</div>
                 </div>
             </div>
