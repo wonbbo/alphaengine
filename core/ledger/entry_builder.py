@@ -10,7 +10,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol
 from uuid import uuid4
 
 from core.domain.events import Event, EventTypes
@@ -24,6 +24,20 @@ if TYPE_CHECKING:
     from core.ledger.store import LedgerStore
 
 logger = logging.getLogger(__name__)
+
+
+class IRestClientForPricing(Protocol):
+    """가격 조회용 REST 클라이언트 인터페이스"""
+    
+    async def get_klines(
+        self,
+        symbol: str,
+        interval: str,
+        limit: int,
+        start_time: int | None = None,
+        end_time: int | None = None,
+    ) -> list[dict[str, Any]]:
+        ...
 
 
 @dataclass
@@ -104,17 +118,34 @@ class JournalEntryBuilder:
     
     각 이벤트 타입별로 핸들러를 호출하여 분개를 생성.
     알 수 없는 이벤트는 Fallback 핸들러로 SUSPENSE 계정에 기록.
+    
+    epoch_date가 설정된 경우, 해당 날짜 이전의 이벤트는 분개하지 않음.
+    (InitialCapitalEstablished 이전 데이터는 Ledger에 포함되면 안됨)
     """
     
-    def __init__(self, ledger_store: LedgerStore | None = None):
+    def __init__(
+        self,
+        ledger_store: LedgerStore | None = None,
+        rest_client: IRestClientForPricing | None = None,
+        epoch_date: datetime | None = None,
+    ):
         """
         Args:
             ledger_store: 동적 계정 생성을 위한 LedgerStore 참조
+            rest_client: 과거 가격 조회를 위한 REST 클라이언트 (선택)
+            epoch_date: 이 날짜 이전의 이벤트는 분개하지 않음 (선택)
         """
         self.ledger_store = ledger_store
+        self.rest_client = rest_client
+        self._epoch_date = epoch_date
         
-        # 가격 캐시 (향후 PriceCache 연동)
+        # 가격 캐시 (실시간 가격 + 과거 조회 결과)
         self._price_cache: dict[str, Decimal] = {}
+    
+    def set_epoch_date(self, epoch_date: datetime) -> None:
+        """epoch_date 설정 (이 날짜 이전 이벤트는 분개 제외)"""
+        self._epoch_date = epoch_date
+        logger.info(f"[Ledger] epoch_date 설정: {epoch_date.isoformat()}")
     
     async def from_event(self, event: Event) -> JournalEntry | None:
         """이벤트에서 분개 생성
@@ -131,7 +162,21 @@ class JournalEntryBuilder:
         미지원 이벤트:
         - 비금융 이벤트: 무시
         - 금융 이벤트(추정): Fallback → SUSPENSE 분개
+        
+        epoch_date 필터링:
+        - InitialCapitalEstablished는 항상 처리 (epoch_date 설정용)
+        - 그 외 이벤트는 epoch_date 이전이면 분개하지 않음
         """
+        # epoch_date 이전 이벤트는 분개하지 않음 (InitialCapitalEstablished 제외)
+        # InitialCapitalEstablished는 epoch_date를 설정하는 이벤트이므로 항상 처리
+        if self._epoch_date and event.event_type != EventTypes.INITIAL_CAPITAL_ESTABLISHED:
+            if event.ts < self._epoch_date:
+                logger.debug(
+                    f"[Ledger] epoch_date 이전 이벤트 건너뜀: "
+                    f"{event.event_type} ts={event.ts.isoformat()} < epoch={self._epoch_date.isoformat()}"
+                )
+                return None
+        
         handlers = {
             EventTypes.TRADE_EXECUTED: self._from_trade_executed,
             EventTypes.FUNDING_APPLIED: self._from_funding_applied,
@@ -140,6 +185,9 @@ class JournalEntryBuilder:
             EventTypes.DEPOSIT_COMPLETED: self._from_deposit,
             EventTypes.WITHDRAW_COMPLETED: self._from_withdraw,
             EventTypes.BALANCE_CHANGED: self._from_balance_changed,
+            EventTypes.DUST_CONVERTED: self._from_dust_converted,
+            EventTypes.INITIAL_CAPITAL_ESTABLISHED: self._from_initial_capital_established,
+            EventTypes.OPENING_BALANCE_ADJUSTED: self._from_opening_balance_adjusted,
         }
         
         handler = handlers.get(event.event_type)
@@ -669,6 +717,390 @@ class JournalEntryBuilder:
             description=f"Balance {'increased' if delta > 0 else 'decreased'}: {asset} {delta}",
         )
     
+    async def _from_dust_converted(self, event: Event) -> JournalEntry:
+        """소액 자산(Dust) → BNB 전환 이벤트 → 분개
+        
+        Binance의 "Convert Small Balance to BNB" 기능으로 발생.
+        여러 소액 자산을 BNB로 일괄 전환하며, 수수료도 BNB로 차감됨.
+        
+        Payload 구조:
+            {
+                "trans_id": "308145879259",
+                "total_transferred_amount": "0.00093607",  # 수령한 BNB 순액
+                "total_service_charge": "0.00001872",       # BNB 수수료
+                "from_assets": ["USDT", "USDC"],
+                "details": [
+                    {
+                        "fromAsset": "USDT",
+                        "amount": "1.03289826",             # 소진된 원본 자산 양
+                        "transferedAmount": "0.00093607",   # 전환된 BNB 양
+                        "serviceChargeAmount": "0.00001872",
+                        "targetAsset": "BNB"
+                    }
+                ]
+            }
+        
+        분개 로직 (균형 보장):
+            Dust 전환은 불리한 환율로 처리되므로 전환 손실이 발생함.
+            전환 손실 = (원본 자산 가치) - (수령 BNB 가치 + 수수료)
+            
+            - Credit: ASSET:{fromAsset} (원본 자산 감소)
+            - Debit: ASSET:BNB (BNB 수령, 순액)
+            - Debit: EXPENSE:FEE:DUST_CONVERSION (수수료)
+            - Debit: EXPENSE:CONVERSION_LOSS (전환 손실, 균형 맞춤)
+        """
+        payload = event.payload
+        venue = "BINANCE_SPOT"  # Dust 전환은 항상 SPOT에서 발생
+        
+        details = payload.get("details", [])
+        if not details:
+            logger.warning(f"[Ledger] DustConverted 이벤트에 details 없음: {event.event_id}")
+            return None
+        
+        lines: list[JournalLine] = []
+        description_parts: list[str] = []
+        total_from_usdt_value = Decimal("0")
+        
+        # 동적 계정 생성
+        if self.ledger_store:
+            await self.ledger_store.ensure_asset_account(venue, "BNB")
+        
+        for detail in details:
+            from_asset = detail.get("fromAsset", "UNKNOWN")
+            from_amount = Decimal(str(detail.get("amount", "0")))
+            
+            if from_amount == 0:
+                continue
+            
+            # 동적 계정 생성
+            if self.ledger_store:
+                await self.ledger_store.ensure_asset_account(venue, from_asset)
+            
+            # 원본 자산의 USDT 환율 조회 (전환 시점 기준)
+            from_usdt_rate = await self._get_usdt_rate(from_asset, event.ts)
+            from_usdt_value = from_amount * from_usdt_rate
+            total_from_usdt_value += from_usdt_value
+            
+            # 원본 자산 감소 (Credit)
+            lines.append(JournalLine(
+                account_id=f"ASSET:{venue}:{from_asset}",
+                side=JournalSide.CREDIT.value,
+                amount=from_amount,
+                asset=from_asset,
+                usdt_value=from_usdt_value,
+                usdt_rate=from_usdt_rate,
+                memo=f"Dust conversion from {from_asset}",
+            ))
+            
+            description_parts.append(f"{from_amount} {from_asset}")
+        
+        # BNB 수령액 및 수수료
+        net_bnb = Decimal(str(payload.get("total_transferred_amount", "0")))
+        fee_bnb = Decimal(str(payload.get("total_service_charge", "0")))
+        
+        # BNB 환율 조회
+        bnb_usdt_rate = await self._get_usdt_rate("BNB", event.ts)
+        
+        # BNB 순액 수령 (Debit)
+        net_bnb_usdt = net_bnb * bnb_usdt_rate
+        lines.append(JournalLine(
+            account_id=f"ASSET:{venue}:BNB",
+            side=JournalSide.DEBIT.value,
+            amount=net_bnb,
+            asset="BNB",
+            usdt_value=net_bnb_usdt,
+            usdt_rate=bnb_usdt_rate,
+            memo="BNB received from dust conversion",
+        ))
+        
+        # 수수료 처리 (Debit) - 수수료는 이미 BNB에서 차감되어 전달됨
+        fee_usdt_value = fee_bnb * bnb_usdt_rate
+        if fee_bnb > 0:
+            lines.append(JournalLine(
+                account_id="EXPENSE:FEE:DUST_CONVERSION",
+                side=JournalSide.DEBIT.value,
+                amount=fee_bnb,
+                asset="BNB",
+                usdt_value=fee_usdt_value,
+                usdt_rate=bnb_usdt_rate,
+                memo="Dust conversion fee",
+            ))
+        
+        # 전환 손실 계산 (균형 맞춤)
+        # 손실 = 원본 자산 가치 - (BNB 수령 가치 + 수수료 가치)
+        total_debit_usdt = net_bnb_usdt + fee_usdt_value
+        conversion_loss_usdt = total_from_usdt_value - total_debit_usdt
+        
+        if conversion_loss_usdt > Decimal("0.001"):
+            # 전환 손실 비용 처리 (Debit)
+            lines.append(JournalLine(
+                account_id="EXPENSE:CONVERSION_LOSS",
+                side=JournalSide.DEBIT.value,
+                amount=conversion_loss_usdt,
+                asset="USDT",
+                usdt_value=conversion_loss_usdt,
+                usdt_rate=Decimal("1"),
+                memo="Dust conversion loss (unfavorable rate)",
+            ))
+        elif conversion_loss_usdt < Decimal("-0.001"):
+            # 전환 이익 (드문 경우) - INCOME으로 처리
+            lines.append(JournalLine(
+                account_id="INCOME:CONVERSION_GAIN",
+                side=JournalSide.CREDIT.value,
+                amount=abs(conversion_loss_usdt),
+                asset="USDT",
+                usdt_value=abs(conversion_loss_usdt),
+                usdt_rate=Decimal("1"),
+                memo="Dust conversion gain",
+            ))
+        
+        return JournalEntry(
+            entry_id=str(uuid4()),
+            ts=event.ts,
+            transaction_type=TransactionType.OTHER.value,
+            scope_mode=event.scope.mode,
+            lines=lines,
+            source_event_id=event.event_id,
+            source=event.source,
+            description=f"Dust converted: {', '.join(description_parts)} → {net_bnb} BNB",
+            raw_data=payload,
+        )
+    
+    async def _from_initial_capital_established(self, event: Event) -> JournalEntry:
+        """초기 자산 설정 이벤트 → 분개
+        
+        Bot 최초 실행 시 Daily Snapshot으로 조회한 초기 자산을 Ledger에 기록.
+        EQUITY:INITIAL_CAPITAL에서 각 ASSET 계정으로 자금이 이동하는 형태.
+        
+        Payload 구조:
+            {
+                "spot_usdt": "0.47498",
+                "futures_usdt": "673.51619127",
+                "total_usdt": "673.99117127",
+                "snapshot_date": "2026-02-18",
+                "spot_balances": [
+                    {"asset": "USDT", "free": "0.47498", "locked": "0"},
+                    {"asset": "USDC", "free": "0.00371569", "locked": "0"}
+                ],
+                "futures_assets": [
+                    {"asset": "USDT", "marginBalance": "673.51619127", "walletBalance": "673.51619127"},
+                    {"asset": "BNB", "marginBalance": "0.10246612", "walletBalance": "0.10246612"}
+                ]
+            }
+        
+        분개 로직:
+            - Credit: EQUITY:INITIAL_CAPITAL (자본 설정)
+            - Debit: 각 ASSET 계정 (SPOT/FUTURES별 자산)
+        """
+        payload = event.payload
+        
+        lines: list[JournalLine] = []
+        total_usdt_value = Decimal("0")
+        description_parts: list[str] = []
+        
+        # SPOT 잔고 처리
+        spot_balances = payload.get("spot_balances", [])
+        for balance in spot_balances:
+            asset = balance.get("asset", "UNKNOWN")
+            free = Decimal(str(balance.get("free", "0")))
+            locked = Decimal(str(balance.get("locked", "0")))
+            amount = free + locked
+            
+            if amount <= 0:
+                continue
+            
+            # 동적 계정 생성
+            if self.ledger_store:
+                await self.ledger_store.ensure_asset_account("BINANCE_SPOT", asset)
+            
+            # USDT 환율 조회
+            usdt_rate = await self._get_usdt_rate(asset, event.ts)
+            usdt_value = amount * usdt_rate
+            total_usdt_value += usdt_value
+            
+            # ASSET 증가 (Debit)
+            lines.append(JournalLine(
+                account_id=f"ASSET:BINANCE_SPOT:{asset}",
+                side=JournalSide.DEBIT.value,
+                amount=amount,
+                asset=asset,
+                usdt_value=usdt_value,
+                usdt_rate=usdt_rate,
+                memo=f"Initial SPOT {asset}",
+            ))
+            
+            description_parts.append(f"SPOT {amount} {asset}")
+        
+        # FUTURES 잔고 처리
+        futures_assets = payload.get("futures_assets", [])
+        for asset_info in futures_assets:
+            asset = asset_info.get("asset", "UNKNOWN")
+            amount = Decimal(str(asset_info.get("walletBalance", "0")))
+            
+            if amount <= 0:
+                continue
+            
+            # 동적 계정 생성
+            if self.ledger_store:
+                await self.ledger_store.ensure_asset_account("BINANCE_FUTURES", asset)
+            
+            # USDT 환율 조회
+            usdt_rate = await self._get_usdt_rate(asset, event.ts)
+            usdt_value = amount * usdt_rate
+            total_usdt_value += usdt_value
+            
+            # ASSET 증가 (Debit)
+            lines.append(JournalLine(
+                account_id=f"ASSET:BINANCE_FUTURES:{asset}",
+                side=JournalSide.DEBIT.value,
+                amount=amount,
+                asset=asset,
+                usdt_value=usdt_value,
+                usdt_rate=usdt_rate,
+                memo=f"Initial FUTURES {asset}",
+            ))
+            
+            description_parts.append(f"FUTURES {amount} {asset}")
+        
+        # EQUITY:INITIAL_CAPITAL (Credit) - 전체 자산의 대응 계정
+        if total_usdt_value > 0:
+            lines.append(JournalLine(
+                account_id="EQUITY:INITIAL_CAPITAL",
+                side=JournalSide.CREDIT.value,
+                amount=total_usdt_value,
+                asset="USDT",
+                usdt_value=total_usdt_value,
+                usdt_rate=Decimal("1"),
+                memo="Initial capital established",
+            ))
+        
+        snapshot_date = payload.get("snapshot_date", "unknown")
+        
+        return JournalEntry(
+            entry_id=str(uuid4()),
+            ts=event.ts,
+            transaction_type=TransactionType.OTHER.value,
+            scope_mode=event.scope.mode,
+            lines=lines,
+            source_event_id=event.event_id,
+            source=event.source,
+            description=f"Initial capital: {total_usdt_value} USDT ({snapshot_date})",
+            memo=f"Snapshot date: {snapshot_date}",
+            raw_data=payload,
+        )
+    
+    async def _from_opening_balance_adjusted(self, event: Event) -> JournalEntry:
+        """기초 잔액 조정 이벤트 → 분개
+        
+        백필 완료 후 Ledger 잔고와 실제 거래소 잔고 차이를 조정.
+        EQUITY:OPENING_ADJUSTMENT 계정을 사용하여 균형 맞춤.
+        
+        Payload 구조:
+            {
+                "venue": "FUTURES",
+                "asset": "USDT",
+                "ledger_balance": "670.00",
+                "exchange_balance": "673.52",
+                "adjustment_amount": "3.52",
+                "adjustment_type": "INCREASE" | "DECREASE",
+                "reason": "opening_balance_reconciliation"
+            }
+        
+        분개 로직:
+            자산 증가 (INCREASE):
+                - Debit: ASSET:{venue}:{asset} (자산 증가)
+                - Credit: EQUITY:OPENING_ADJUSTMENT (자본 조정)
+            
+            자산 감소 (DECREASE):
+                - Debit: EQUITY:OPENING_ADJUSTMENT (자본 조정)
+                - Credit: ASSET:{venue}:{asset} (자산 감소)
+        """
+        payload = event.payload
+        venue = payload.get("venue", "FUTURES")
+        asset = payload.get("asset", "USDT")
+        adjustment_amount = Decimal(str(payload.get("adjustment_amount", "0")))
+        adjustment_type = payload.get("adjustment_type", "INCREASE")
+        
+        # 음수 금액은 양수로 변환 (adjustment_type으로 방향 결정)
+        amount = abs(adjustment_amount)
+        
+        if amount == 0:
+            logger.debug(
+                f"[Ledger] 조정 금액 0, 분개 생성 건너뜀: {venue} {asset}"
+            )
+            return None
+        
+        # venue 포맷 조정
+        venue_account = f"BINANCE_{venue}" if not venue.startswith("BINANCE_") else venue
+        
+        # 동적 계정 생성
+        if self.ledger_store:
+            await self.ledger_store.ensure_asset_account(venue_account, asset)
+        
+        # USDT 환율 조회
+        usdt_rate = await self._get_usdt_rate(asset, event.ts)
+        usdt_value = amount * usdt_rate
+        
+        lines: list[JournalLine] = []
+        
+        if adjustment_type == "INCREASE":
+            # 자산 증가: ASSET Debit, EQUITY Credit
+            lines.append(JournalLine(
+                account_id=f"ASSET:{venue_account}:{asset}",
+                side=JournalSide.DEBIT.value,
+                amount=amount,
+                asset=asset,
+                usdt_value=usdt_value,
+                usdt_rate=usdt_rate,
+                memo=f"Opening adjustment: +{amount} {asset}",
+            ))
+            lines.append(JournalLine(
+                account_id="EQUITY:OPENING_ADJUSTMENT",
+                side=JournalSide.CREDIT.value,
+                amount=usdt_value,
+                asset="USDT",
+                usdt_value=usdt_value,
+                usdt_rate=Decimal("1"),
+                memo="Opening balance reconciliation",
+            ))
+        else:
+            # 자산 감소: EQUITY Debit, ASSET Credit
+            lines.append(JournalLine(
+                account_id="EQUITY:OPENING_ADJUSTMENT",
+                side=JournalSide.DEBIT.value,
+                amount=usdt_value,
+                asset="USDT",
+                usdt_value=usdt_value,
+                usdt_rate=Decimal("1"),
+                memo="Opening balance reconciliation",
+            ))
+            lines.append(JournalLine(
+                account_id=f"ASSET:{venue_account}:{asset}",
+                side=JournalSide.CREDIT.value,
+                amount=amount,
+                asset=asset,
+                usdt_value=usdt_value,
+                usdt_rate=usdt_rate,
+                memo=f"Opening adjustment: -{amount} {asset}",
+            ))
+        
+        ledger_balance = payload.get("ledger_balance", "0")
+        exchange_balance = payload.get("exchange_balance", "0")
+        sign = "+" if adjustment_type == "INCREASE" else "-"
+        
+        return JournalEntry(
+            entry_id=str(uuid4()),
+            ts=event.ts,
+            transaction_type=TransactionType.ADJUSTMENT.value,
+            scope_mode=event.scope.mode,
+            lines=lines,
+            source_event_id=event.event_id,
+            source=event.source,
+            description=f"Opening adjustment: {venue} {asset} {sign}{amount} (ledger:{ledger_balance} → exchange:{exchange_balance})",
+            memo=payload.get("reason", "opening_balance_reconciliation"),
+            raw_data=payload,
+        )
+    
     async def _from_generic_event(self, event: Event) -> JournalEntry | None:
         """알 수 없는 이벤트 Fallback 처리.
         
@@ -727,11 +1159,12 @@ class JournalEntryBuilder:
         환율 소스 우선순위:
         1. USDT는 항상 1
         2. 캐시된 최근 시세
-        3. 기본값 + 경고 로깅
+        3. REST API로 과거 가격 조회 (rest_client가 주입된 경우)
+        4. 기본값 + 경고 로깅
         
         Args:
             asset: BTC, ETH, BNB, USDT, ...
-            ts: 거래 발생 시점 (현재는 미사용, 향후 과거 시세 조회용)
+            ts: 거래 발생 시점 (과거 시세 조회에 사용)
         
         Returns:
             1 ASSET = ? USDT
@@ -739,17 +1172,68 @@ class JournalEntryBuilder:
         if asset == "USDT":
             return Decimal("1")
         
-        # 캐시에서 조회
         cache_key = f"{asset}USDT"
         if cache_key in self._price_cache:
             return self._price_cache[cache_key]
         
-        # Fallback: 경고 로그 + 기본값 1 (실제 운영에서는 수정 필요)
+        if self.rest_client:
+            try:
+                historical_rate = await self._fetch_historical_price(asset, ts)
+                if historical_rate:
+                    self._price_cache[cache_key] = historical_rate
+                    return historical_rate
+            except Exception as e:
+                logger.warning(
+                    f"[Ledger] 과거 환율 조회 실패: {asset} @ {ts}. 에러: {e}"
+                )
+        
         logger.warning(
             f"[Ledger] USDT 환율 조회 실패: {asset}. "
             "수동 확인 필요. 임시로 rate=1 적용."
         )
         return Decimal("1")
+    
+    async def _fetch_historical_price(
+        self,
+        asset: str,
+        ts: datetime,
+    ) -> Decimal | None:
+        """Klines API를 사용하여 과거 가격 조회
+        
+        해당 시점의 1분봉 종가를 환율로 사용.
+        
+        Args:
+            asset: 자산 코드 (예: BNB, BTC)
+            ts: 조회할 시점
+            
+        Returns:
+            종가 (Decimal) 또는 None
+        """
+        if not self.rest_client:
+            return None
+        
+        symbol = f"{asset}USDT"
+        ts_ms = int(ts.timestamp() * 1000)
+        
+        try:
+            klines = await self.rest_client.get_klines(
+                symbol=symbol,
+                interval="1m",
+                limit=1,
+                end_time=ts_ms,
+            )
+            
+            if klines:
+                close_price = Decimal(klines[0]["close"])
+                logger.debug(
+                    f"[Ledger] 과거 환율 조회 성공: {asset}={close_price} USDT @ {ts}"
+                )
+                return close_price
+                
+        except Exception as e:
+            logger.debug(f"[Ledger] Klines 조회 실패 ({symbol}): {e}")
+        
+        return None
     
     def set_price(self, symbol: str, price: Decimal) -> None:
         """가격 캐시 설정 (외부에서 주입)

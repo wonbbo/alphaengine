@@ -373,3 +373,139 @@ def generate_balance_dedup_key(
         'BINANCE:FUTURES:USDT:balance:1708408800000'
     """
     return f"{exchange}:{venue}:{asset}:balance:{update_time}"
+
+
+# -------------------------------------------------------------------------
+# 과거 데이터 복구용 dedup_key 생성 함수
+# -------------------------------------------------------------------------
+
+
+def make_initial_capital_dedup_key(
+    mode: str,
+    snapshot_date: str,
+) -> str:
+    """InitialCapitalEstablished용 dedup_key 생성
+
+    Args:
+        mode: 운영 모드 (production, testnet)
+        snapshot_date: 스냅샷 날짜 (YYYY-MM-DD)
+
+    Returns:
+        dedup_key: initial_capital:{mode}:{snapshot_date}
+
+    Example:
+        >>> make_initial_capital_dedup_key("production", "2024-01-15")
+        'initial_capital:production:2024-01-15'
+    """
+    return f"initial_capital:{mode}:{snapshot_date}"
+
+
+def make_income_dedup_key(
+    exchange: str,
+    income_type: str,
+    tran_id: int | str,
+) -> str:
+    """Income History 이벤트용 dedup_key 생성 (FundingApplied, CommissionRebateReceived 등)
+
+    Args:
+        exchange: 거래소 (예: BINANCE)
+        income_type: Income 유형 (FUNDING_FEE, COMMISSION_REBATE 등)
+        tran_id: 거래소의 트랜잭션 ID
+
+    Returns:
+        dedup_key: {exchange}:income:{income_type}:{tran_id}
+
+    Example:
+        >>> make_income_dedup_key("BINANCE", "FUNDING_FEE", 9689322393)
+        'BINANCE:income:FUNDING_FEE:9689322393'
+    """
+    return f"{exchange}:income:{income_type}:{tran_id}"
+
+
+def make_convert_dedup_key(
+    exchange: str,
+    order_id: int | str,
+) -> str:
+    """ConvertExecuted용 dedup_key 생성
+
+    Args:
+        exchange: 거래소 (예: BINANCE)
+        order_id: Convert 주문 ID
+
+    Returns:
+        dedup_key: {exchange}:convert:{order_id}
+
+    Example:
+        >>> make_convert_dedup_key("BINANCE", 940708407462087195)
+        'BINANCE:convert:940708407462087195'
+    """
+    return f"{exchange}:convert:{order_id}"
+
+
+def make_dust_dedup_key(
+    exchange: str,
+    trans_id: int | str,
+) -> str:
+    """DustConverted용 dedup_key 생성
+
+    Args:
+        exchange: 거래소 (예: BINANCE)
+        trans_id: Dust 전환 트랜잭션 ID
+
+    Returns:
+        dedup_key: {exchange}:dust:{trans_id}
+
+    Example:
+        >>> make_dust_dedup_key("BINANCE", 45178372831)
+        'BINANCE:dust:45178372831'
+    """
+    return f"{exchange}:dust:{trans_id}"
+
+
+def make_commission_rebate_dedup_key(
+    exchange: str,
+    tran_id: int | str,
+) -> str:
+    """CommissionRebateReceived용 dedup_key 생성
+
+    Args:
+        exchange: 거래소 (예: BINANCE)
+        tran_id: 트랜잭션 ID
+
+    Returns:
+        dedup_key: {exchange}:rebate:{tran_id}
+
+    Example:
+        >>> make_commission_rebate_dedup_key("BINANCE", 9689322394)
+        'BINANCE:rebate:9689322394'
+    """
+    return f"{exchange}:rebate:{tran_id}"
+
+
+def make_opening_adjustment_dedup_key(
+    mode: str,
+    venue: str,
+    asset: str,
+    timestamp_ms: int | None = None,
+) -> str:
+    """OpeningBalanceAdjusted용 dedup_key 생성
+
+    Args:
+        mode: 운영 모드 (production, testnet)
+        venue: Venue (FUTURES, SPOT)
+        asset: 자산 (예: USDT)
+        timestamp_ms: 밀리초 타임스탬프, None이면 현재 시간 사용
+
+    Returns:
+        dedup_key: opening_adjustment:{mode}:{venue}:{asset}:{timestamp_ms}
+
+    Example:
+        >>> make_opening_adjustment_dedup_key("production", "FUTURES", "USDT", 1708550400000)
+        'opening_adjustment:production:FUTURES:USDT:1708550400000'
+    """
+    from datetime import datetime, timezone
+    
+    if timestamp_ms is None:
+        timestamp_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    
+    return f"opening_adjustment:{mode}:{venue}:{asset}:{timestamp_ms}"

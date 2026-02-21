@@ -41,6 +41,15 @@ from bot.strategy.runner import StrategyRunner
 from bot.market_data.provider import MarketDataProvider
 from bot.transfer.manager import TransferManager
 from bot.bnb_fee.manager import BnbFeeManager
+from bot.recovery.initial_capital import InitialCapitalRecorder
+from bot.recovery.backfill import HistoricalDataRecovery
+from bot.recovery.opening_reconciler import OpeningBalanceReconciler
+from bot.poller.income_poller import IncomePoller
+from bot.poller.transfer_poller import TransferPoller
+from bot.poller.convert_poller import ConvertPoller
+from bot.poller.deposit_withdraw_poller import DepositWithdrawPoller
+from bot.poller.reconciliation_poller import ReconciliationPoller
+from bot.poller.price_cache_poller import PriceCachePoller
 from adapters.slack.notifier import SlackNotifier
 from adapters.upbit.rest_client import UpbitRestClient
 
@@ -90,6 +99,19 @@ class BotEngine:
         self.transfer_manager: TransferManager | None = None
         self.upbit_client: UpbitRestClient | None = None
         self.bnb_fee_manager: BnbFeeManager | None = None
+        
+        # Recovery 컴포넌트
+        self.initial_capital_recorder: InitialCapitalRecorder | None = None
+        self.historical_recovery: HistoricalDataRecovery | None = None
+        self.opening_reconciler: OpeningBalanceReconciler | None = None
+        
+        # Poller 컴포넌트
+        self.income_poller: IncomePoller | None = None
+        self.transfer_poller: TransferPoller | None = None
+        self.convert_poller: ConvertPoller | None = None
+        self.deposit_withdraw_poller: DepositWithdrawPoller | None = None
+        self.reconciliation_poller: ReconciliationPoller | None = None
+        self.price_cache_poller: PriceCachePoller | None = None
         
         # 전략 설정 (런타임에 config_store에서 로드)
         self.strategy_config: dict[str, Any] = {}
@@ -289,8 +311,12 @@ class BotEngine:
         
         scope_with_symbol = self._scope_with_symbol()
         
-        # 1. Projector
-        self.projector = EventProjector(self.db, self.event_store)
+        # 1. Projector (rest_client 주입으로 Ledger에서 과거 가격 조회 가능)
+        self.projector = EventProjector(
+            self.db,
+            self.event_store,
+            rest_client=self.rest_client,
+        )
         await self.projector.initialize()
         logger.info("  - Projector 초기화 완료")
         
@@ -397,6 +423,90 @@ class BotEngine:
         self.bnb_fee_manager = await self._init_bnb_fee_manager()
         if self.bnb_fee_manager:
             logger.info("  - BnbFeeManager 초기화 완료")
+        
+        # 13. Recovery 컴포넌트
+        self.initial_capital_recorder = InitialCapitalRecorder(
+            rest_client=self.rest_client,
+            event_store=self.event_store,
+            config_store=self.config_store,
+            scope=scope_with_symbol,
+        )
+        logger.info("  - InitialCapitalRecorder 초기화 완료")
+        
+        self.historical_recovery = HistoricalDataRecovery(
+            rest_client=self.rest_client,
+            event_store=self.event_store,
+            scope=scope_with_symbol,
+            max_days=20,
+        )
+        logger.info("  - HistoricalDataRecovery 초기화 완료")
+        
+        self.opening_reconciler = OpeningBalanceReconciler(
+            rest_client=self.rest_client,
+            event_store=self.event_store,
+            scope=scope_with_symbol,
+        )
+        logger.info("  - OpeningBalanceReconciler 초기화 완료")
+        
+        # 14. Poller 컴포넌트
+        self.income_poller = IncomePoller(
+            rest_client=self.rest_client,
+            event_store=self.event_store,
+            config_store=self.config_store,
+            scope=scope_with_symbol,
+        )
+        await self.income_poller.initialize()
+        logger.info("  - IncomePoller 초기화 완료")
+        
+        self.transfer_poller = TransferPoller(
+            rest_client=self.rest_client,
+            event_store=self.event_store,
+            config_store=self.config_store,
+            scope=scope_with_symbol,
+        )
+        await self.transfer_poller.initialize()
+        logger.info("  - TransferPoller 초기화 완료")
+        
+        self.convert_poller = ConvertPoller(
+            rest_client=self.rest_client,
+            event_store=self.event_store,
+            config_store=self.config_store,
+            scope=scope_with_symbol,
+        )
+        await self.convert_poller.initialize()
+        logger.info("  - ConvertPoller 초기화 완료")
+        
+        self.deposit_withdraw_poller = DepositWithdrawPoller(
+            rest_client=self.rest_client,
+            event_store=self.event_store,
+            config_store=self.config_store,
+            scope=scope_with_symbol,
+        )
+        await self.deposit_withdraw_poller.initialize()
+        logger.info("  - DepositWithdrawPoller 초기화 완료")
+        
+        # 15. ReconciliationPoller (일일 잔고 정합)
+        self.reconciliation_poller = ReconciliationPoller(
+            rest_client=self.rest_client,
+            event_store=self.event_store,
+            config_store=self.config_store,
+            scope=scope_with_symbol,
+            ledger_balance_getter=self._get_ledger_balances_for_reconciliation,
+            target_symbol=self.target_symbol,
+        )
+        await self.reconciliation_poller.initialize()
+        logger.info("  - ReconciliationPoller 초기화 완료")
+        
+        # 16. PriceCachePoller (가격 캐시 - Web에서 사용)
+        self.price_cache_poller = PriceCachePoller(
+            rest_client=self.rest_client,
+            config_store=self.config_store,
+            symbols=["BNBUSDT", "BTCUSDT", "ETHUSDT", "XRPUSDT", "USDCUSDT"],
+            poll_interval_seconds=60,  # 1분마다 가격 업데이트
+        )
+        # 초기 가격 캐시 수행
+        await self.price_cache_poller.poll()
+        logger.info("  - PriceCachePoller 초기화 완료")
         
         logger.info("Bot 컴포넌트 초기화 완료")
     
@@ -630,6 +740,143 @@ class BotEngine:
         else:
             logger.info(f"전략 로드됨 (auto_start=False로 대기 상태): {strategy_name}")
     
+    async def _is_first_run(self) -> bool:
+        """최초 실행 여부 확인
+        
+        config_store에서 initial_capital.initialized 플래그를 확인합니다.
+        """
+        if self.initial_capital_recorder:
+            return not await self.initial_capital_recorder.is_initialized()
+        return False
+    
+    async def _get_ledger_balances_for_reconciliation(self) -> dict[str, dict[str, "Decimal"]]:
+        """Opening Balance 정합용 Ledger 잔고 조회
+        
+        Projector의 Ledger 잔고를 조회하여 OpeningBalanceReconciler에 전달할 형식으로 변환.
+        
+        Returns:
+            {
+                "FUTURES": {"USDT": Decimal("670.00"), "BNB": Decimal("0.1")},
+                "SPOT": {"USDT": Decimal("0.47"), "BNB": Decimal("0.5")},
+            }
+        """
+        from decimal import Decimal
+        
+        result: dict[str, dict[str, Decimal]] = {
+            "FUTURES": {},
+            "SPOT": {},
+        }
+        
+        if not self.projector or not self.projector._ledger_store:
+            return result
+        
+        # 현재 scope의 mode 사용
+        mode = self.scope.mode
+        
+        try:
+            # Trial Balance에서 ASSET 계정 잔고 조회 (mode 필수, async)
+            trial_balance = await self.projector._ledger_store.get_trial_balance(mode)
+            
+            for account in trial_balance:
+                account_id = account.get("account_id", "")
+                balance = Decimal(str(account.get("balance", "0")))
+                
+                # ASSET:BINANCE_FUTURES:* 형식 파싱
+                if account_id.startswith("ASSET:BINANCE_FUTURES:"):
+                    asset = account_id.replace("ASSET:BINANCE_FUTURES:", "")
+                    if balance > 0:
+                        result["FUTURES"][asset] = balance
+                
+                # ASSET:BINANCE_SPOT:* 형식 파싱
+                elif account_id.startswith("ASSET:BINANCE_SPOT:"):
+                    asset = account_id.replace("ASSET:BINANCE_SPOT:", "")
+                    if balance > 0:
+                        result["SPOT"][asset] = balance
+            
+            logger.debug(f"Ledger 잔고 조회 완료: FUTURES={result['FUTURES']}, SPOT={result['SPOT']}")
+            
+        except Exception as e:
+            logger.warning(f"Ledger 잔고 조회 실패: {e}")
+        
+        return result
+    
+    async def _run_initial_recovery(self) -> None:
+        """최초 실행 시 초기 자산 기록 및 과거 데이터 백필
+        
+        실행 순서:
+        1. InitialCapitalRecorder로 Daily Snapshot 조회 및 초기 자산 기록
+        2. epoch_date(Snapshot 날짜)부터 현재까지 과거 데이터 백필
+        
+        이렇게 하면 InitialCapitalEstablished 이벤트의 ts가 백필 시작일과
+        동일하므로 Ledger에서 음수 잔고가 발생하지 않습니다.
+        """
+        logger.info("최초 실행 감지 - 초기 자산 및 과거 데이터 복구 시작")
+        
+        epoch_date: str | None = None
+        
+        # 1. 초기 자산 기록 (Daily Snapshot)
+        if self.initial_capital_recorder:
+            try:
+                result = await self.initial_capital_recorder.record()
+                epoch_date = result.get("epoch_date")
+                logger.info(
+                    "초기 자산 기록 완료",
+                    extra={
+                        "total_usdt": result.get("USDT", "0"),
+                        "epoch_date": epoch_date,
+                    },
+                )
+            except Exception as e:
+                logger.error(f"초기 자산 기록 실패: {e}")
+        
+        # 2. 과거 데이터 백필 (epoch_date부터 현재까지)
+        # epoch_date가 없으면 기존 방식(20일)으로 폴백
+        if self.historical_recovery:
+            try:
+                backfill_result = await self.historical_recovery.backfill(
+                    epoch_date=epoch_date,
+                    days=20,
+                )
+                logger.info(
+                    "과거 데이터 백필 완료",
+                    extra={"total_events": backfill_result["total"]},
+                )
+            except Exception as e:
+                logger.error(f"과거 데이터 백필 실패: {e}")
+        
+        # 3. Projector로 이벤트 처리하여 Ledger 구성
+        if self.projector:
+            try:
+                await self.projector.apply_all_pending()
+                logger.info("백필 이벤트 Projection 완료")
+            except Exception as e:
+                logger.error(f"백필 이벤트 Projection 실패: {e}")
+        
+        # 4. Opening Balance 정합 (Ledger vs 거래소 실제 잔고)
+        if self.opening_reconciler and self.projector:
+            try:
+                ledger_balances = await self._get_ledger_balances_for_reconciliation()
+                reconcile_result = await self.opening_reconciler.reconcile(ledger_balances)
+                
+                if reconcile_result["adjusted_count"] > 0:
+                    logger.info(
+                        "기초 잔액 정합 완료",
+                        extra={
+                            "adjusted": reconcile_result["adjusted_count"],
+                            "skipped": reconcile_result["skipped_count"],
+                        },
+                    )
+                    
+                    # 조정 이벤트도 Projection 적용
+                    await self.projector.apply_all_pending()
+                else:
+                    logger.info("기초 잔액 정합 불필요 (차이 없음)")
+                    
+            except Exception as e:
+                logger.error(f"기초 잔액 정합 실패: {e}")
+        
+        logger.info("초기 자산 및 과거 데이터 복구 완료")
+    
     async def start(self) -> None:
         """엔진 시작"""
         # 시작 시간 기록
@@ -650,13 +897,38 @@ class BotEngine:
                 started_at=self._started_at,
             )
         
-        # 초기 상태 동기화
+        # 최초 실행 시 초기 자산 기록 및 과거 데이터 백필
+        if await self._is_first_run():
+            await self._run_initial_recovery()
+        
+        # 초기 상태 동기화 (REST API로 최신 잔고 조회)
         if self.reconciler:
             await self.reconciler.full_reconcile()
         
         # 초기 Projection 적용
         if self.projector:
             await self.projector.apply_all_pending()
+        
+        # full_reconcile 후 Ledger와 실제 잔고 차이 최종 정합
+        # (full_reconcile로 projection_balance가 업데이트되었으므로, 
+        #  이 시점에서 Ledger와 실제 잔고 차이를 조정)
+        if self.opening_reconciler and self.projector:
+            try:
+                ledger_balances = await self._get_ledger_balances_for_reconciliation()
+                reconcile_result = await self.opening_reconciler.reconcile(ledger_balances)
+                
+                if reconcile_result["adjusted_count"] > 0:
+                    logger.info(
+                        "초기 동기화 후 잔고 정합 완료",
+                        extra={
+                            "adjusted": reconcile_result["adjusted_count"],
+                            "skipped": reconcile_result["skipped_count"],
+                        },
+                    )
+                    # 조정 이벤트 Projection 적용
+                    await self.projector.apply_all_pending()
+            except Exception as e:
+                logger.warning(f"초기 동기화 후 잔고 정합 실패: {e}")
         
         # WebSocket 연결 시작
         if self.ws_listener:
@@ -701,6 +973,20 @@ class BotEngine:
         # 전략 종료
         if self.strategy_runner and self.strategy_runner.is_running:
             await self.strategy_runner.stop()
+        
+        # Poller 종료
+        pollers = [
+            self.income_poller,
+            self.transfer_poller,
+            self.convert_poller,
+            self.deposit_withdraw_poller,
+            self.reconciliation_poller,
+            self.price_cache_poller,
+        ]
+        for poller in pollers:
+            if poller:
+                await poller.stop()
+        logger.info("Poller 종료됨")
         
         # TransferManager 모니터링 종료
         if self.transfer_manager:
@@ -767,7 +1053,10 @@ class BotEngine:
                     if await self.bnb_fee_manager.should_check():
                         await self.bnb_fee_manager.check_and_replenish()
                 
-                # 6. Heartbeat 로그 (10초마다)
+                # 6. Poller: 주기적 REST API 폴링
+                await self._run_pollers()
+                
+                # 7. Heartbeat 로그 (10초마다)
                 if self._tick_count % 100 == 0:
                     await self._log_heartbeat()
                     
@@ -777,6 +1066,30 @@ class BotEngine:
             await asyncio.sleep(self.tick_interval)
         
         logger.info("메인 루프 종료")
+    
+    async def _run_pollers(self) -> None:
+        """모든 Poller 실행 (주기가 된 것만)
+        
+        각 Poller는 자체적으로 폴링 간격을 관리합니다.
+        """
+        pollers = [
+            self.income_poller,
+            self.transfer_poller,
+            self.convert_poller,
+            self.deposit_withdraw_poller,
+            self.reconciliation_poller,
+            self.price_cache_poller,
+        ]
+        
+        for poller in pollers:
+            if poller:
+                try:
+                    if await poller.should_poll():
+                        await poller.poll()
+                except Exception as e:
+                    logger.warning(
+                        f"Poller 실행 실패 ({poller.poller_name}): {e}"
+                    )
     
     async def _on_strategy_status_change(
         self,

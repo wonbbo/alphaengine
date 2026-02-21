@@ -200,18 +200,22 @@ class PnLService:
     async def _get_current_equity(self, mode: str) -> float:
         """현재 총 자산
         
-        ASSET 계정 중 Binance 관련 계정의 합계.
+        projection_balance 테이블에서 USDT 잔고 합계 조회.
+        Ledger account_balance 대신 projection_balance를 사용하는 이유:
+        - projection_balance는 WebSocket/REST에서 실시간 동기화되어 정확함
+        - Ledger는 분개 기반이라 초기 자산이 누락될 수 있음
         """
         try:
-            portfolio = await self.ledger_store.get_portfolio(mode)
-            
-            # USDT 합계 (SPOT + FUTURES)
-            total = sum(
-                p["balance"] or 0
-                for p in portfolio
-                if p["asset"] == "USDT"
+            rows = await self.db.fetchall(
+                """
+                SELECT COALESCE(SUM(CAST(free AS REAL) + CAST(locked AS REAL)), 0) as total
+                FROM projection_balance
+                WHERE scope_mode = ? AND asset = 'USDT'
+                """,
+                (mode,),
             )
-            return total
+            if rows and rows[0][0]:
+                return float(rows[0][0])
         except Exception as e:
             logger.debug(f"Failed to get current equity: {e}")
         return 0.0

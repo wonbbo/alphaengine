@@ -90,6 +90,12 @@ class WithdrawStatusResponse(BaseModel):
     warning: str | None
     pending_withdraw: bool
     pending_transfer_id: str | None
+    # 예상 출금 계산용 시세 정보
+    trx_usdt_price: str | None = None
+    trx_krw_price: str | None = None
+    network_fee_trx: str | None = None
+    binance_trade_fee_rate: str | None = None
+    upbit_trade_fee_rate: str | None = None
 
 
 class TransferResponseModel(BaseModel):

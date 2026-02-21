@@ -68,10 +68,12 @@ class EventProjector:
         event_store: EventStore,
         checkpoint_name: str = CHECKPOINT_NAME,
         enable_ledger: bool = True,
+        rest_client: Any = None,
     ):
         self.adapter = adapter
         self.event_store = event_store
         self.checkpoint_name = checkpoint_name
+        self._rest_client = rest_client
         
         # 핸들러 레지스트리
         self._handlers: dict[str, ProjectionHandler] = {}
@@ -122,10 +124,14 @@ class EventProjector:
         """복식부기 (Ledger) 초기화
         
         ledger 테이블이 존재하면 활성화, 없으면 비활성화.
+        rest_client가 있으면 과거 가격 조회 가능.
         """
         try:
             self._ledger_store = LedgerStore(self.adapter)
-            self._entry_builder = JournalEntryBuilder(self._ledger_store)
+            self._entry_builder = JournalEntryBuilder(
+                self._ledger_store,
+                rest_client=self._rest_client,
+            )
             self._ledger_enabled = True
             logger.info("Ledger integration enabled")
         except Exception as e:
@@ -152,7 +158,45 @@ class EventProjector:
             except Exception as e:
                 logger.warning(f"Handler initialization failed: {e}")
         
+        # Ledger epoch_date 로드 (InitialCapitalEstablished 이벤트의 ts)
+        await self._load_ledger_epoch_date()
+        
         logger.info(f"Projector initialized with {len(unique_handlers)} handlers")
+    
+    async def _load_ledger_epoch_date(self) -> None:
+        """DB에서 InitialCapitalEstablished 이벤트의 ts를 로드하여 epoch_date 설정
+        
+        이렇게 하면 Projector 재시작 시에도 epoch_date가 유지됨.
+        epoch_date 이전의 백필 이벤트는 Ledger에 기록되지 않음.
+        """
+        if not self._ledger_enabled or self._entry_builder is None:
+            return
+        
+        try:
+            # InitialCapitalEstablished 이벤트 조회
+            row = await self.adapter.fetchone(
+                """
+                SELECT ts FROM event_store
+                WHERE event_type = 'InitialCapitalEstablished'
+                ORDER BY ts ASC
+                LIMIT 1
+                """
+            )
+            
+            if row and row[0]:
+                from datetime import datetime, timezone
+                
+                ts_str = row[0]
+                # ISO 형식 파싱
+                if "+" in ts_str or ts_str.endswith("Z"):
+                    epoch_date = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+                else:
+                    epoch_date = datetime.fromisoformat(ts_str).replace(tzinfo=timezone.utc)
+                
+                self._entry_builder.set_epoch_date(epoch_date)
+                logger.info(f"Ledger epoch_date loaded: {epoch_date.isoformat()}")
+        except Exception as e:
+            logger.warning(f"Failed to load ledger epoch_date: {e}")
     
     def register_handler(self, handler: ProjectionHandler) -> None:
         """핸들러 등록
@@ -373,6 +417,10 @@ class EventProjector:
         """복식부기 분개 생성 및 저장
         
         실패해도 기존 Projection 로직에 영향 없음.
+        
+        InitialCapitalEstablished 이벤트 처리 시:
+        - epoch_date 설정 (이후 이벤트만 분개)
+        - 백필된 과거 데이터 중 epoch_date 이전 것은 자동 필터링됨
         """
         if not self._ledger_enabled:
             return
@@ -381,6 +429,10 @@ class EventProjector:
             return
         
         try:
+            # InitialCapitalEstablished 이벤트 처리 시 epoch_date 자동 설정
+            if event.event_type == "InitialCapitalEstablished":
+                self._entry_builder.set_epoch_date(event.ts)
+            
             entry = await self._entry_builder.from_event(event)
             if entry:
                 await self._ledger_store.save_entry(entry)

@@ -6,6 +6,15 @@ let pollingInterval = null;
 let maxDepositAmount = 0;
 let maxWithdrawAmount = 0;
 
+// 출금 예상 금액 계산용 시세 정보
+let withdrawPriceInfo = {
+    trxUsdtPrice: 0,
+    trxKrwPrice: 0,
+    networkFeeTrx: 1,
+    binanceTradeRate: 0.001,
+    upbitTradeRate: 0.0005,
+};
+
 // =========================================================================
 // 입금 상태
 // =========================================================================
@@ -80,12 +89,28 @@ async function loadDepositStatus() {
             loadTransferProgress(data.pending_transfer_id);
             
         } else {
-            // 입금 불가
-            statusDiv.innerHTML = '';
+            // 입금 불가 - 현재 잔고 정보 함께 표시
+            const krwBalance = parseFloat(data.krw_balance || 0);
+            const trxBalance = parseFloat(data.trx_balance || 0);
+            
+            statusDiv.innerHTML = `
+                <div class="balance-info mb-3">
+                    <div class="row">
+                        <div class="col-6">
+                            <div class="balance-label">KRW 잔고</div>
+                            <div class="balance-value text-warning">${formatNumber(krwBalance)}원</div>
+                        </div>
+                        <div class="col-6">
+                            <div class="balance-label">TRX 잔고</div>
+                            <div class="balance-value">${formatNumber(trxBalance)} TRX</div>
+                        </div>
+                    </div>
+                </div>
+            `;
             form.classList.add('d-none');
             unavailable.classList.remove('d-none');
             document.getElementById('deposit-unavailable-msg').textContent = 
-                'KRW 잔고가 부족합니다. (최소 5,000원 필요)';
+                `KRW 잔고가 부족합니다. (최소 5,000원 필요, 현재: ${formatNumber(krwBalance)}원)`;
         }
         
     } catch (error) {
@@ -129,6 +154,15 @@ async function loadWithdrawStatus() {
         const data = await response.json();
         
         if (data.can_withdraw && !data.pending_withdraw) {
+            // 시세 정보 저장
+            withdrawPriceInfo = {
+                trxUsdtPrice: parseFloat(data.trx_usdt_price || 0),
+                trxKrwPrice: parseFloat(data.trx_krw_price || 0),
+                networkFeeTrx: parseFloat(data.network_fee_trx || 1),
+                binanceTradeRate: parseFloat(data.binance_trade_fee_rate || 0.001),
+                upbitTradeRate: parseFloat(data.upbit_trade_fee_rate || 0.0005),
+            };
+            
             // 출금 가능
             statusDiv.innerHTML = `
                 <div class="balance-info">
@@ -140,6 +174,16 @@ async function loadWithdrawStatus() {
                         <div class="col-6">
                             <div class="balance-label">최소 출금</div>
                             <div class="balance-value">${formatNumber(data.min_withdraw_usdt)} USDT</div>
+                        </div>
+                    </div>
+                    <div class="row mt-2">
+                        <div class="col-6">
+                            <div class="balance-label">TRX/USDT</div>
+                            <div class="balance-value">${formatNumber(withdrawPriceInfo.trxUsdtPrice)} USDT</div>
+                        </div>
+                        <div class="col-6">
+                            <div class="balance-label">TRX/KRW</div>
+                            <div class="balance-value">${formatNumber(withdrawPriceInfo.trxKrwPrice)}원</div>
                         </div>
                     </div>
                 </div>
@@ -159,6 +203,11 @@ async function loadWithdrawStatus() {
             // 최대 출금 가능 금액 설정
             maxWithdrawAmount = parseFloat(data.usdt_balance);
             document.getElementById('withdraw-amount').max = maxWithdrawAmount;
+            
+            // 예상 금액 계산 이벤트 바인딩
+            const amountInput = document.getElementById('withdraw-amount');
+            amountInput.removeEventListener('input', updateWithdrawEstimate);
+            amountInput.addEventListener('input', updateWithdrawEstimate);
             
         } else if (data.pending_withdraw) {
             // 출금 진행 중
@@ -654,6 +703,78 @@ function setWithdrawPercent(percent) {
     amount = Math.floor(amount * 100) / 100;
     
     document.getElementById('withdraw-amount').value = amount;
+    
+    // 예상 금액 업데이트
+    updateWithdrawEstimate();
+}
+
+// =========================================================================
+// 예상 출금 금액 계산
+// =========================================================================
+
+function updateWithdrawEstimate() {
+    const amountInput = document.getElementById('withdraw-amount');
+    const estimateDiv = document.getElementById('withdraw-estimate');
+    
+    if (!estimateDiv) return;
+    
+    const usdtAmount = parseFloat(amountInput.value) || 0;
+    
+    if (usdtAmount <= 0 || withdrawPriceInfo.trxUsdtPrice <= 0) {
+        estimateDiv.classList.add('d-none');
+        return;
+    }
+    
+    // 출금 과정 계산:
+    // 1. USDT -> TRX 환전 (Binance 거래 수수료 0.1%)
+    const usdtAfterFee = usdtAmount * (1 - withdrawPriceInfo.binanceTradeRate);
+    const trxAmount = usdtAfterFee / withdrawPriceInfo.trxUsdtPrice;
+    
+    // 2. TRX 출금 수수료 (1 TRX)
+    const trxAfterNetworkFee = Math.max(0, trxAmount - withdrawPriceInfo.networkFeeTrx);
+    
+    // 3. TRX -> KRW 환전 (Upbit 거래 수수료 0.05%)
+    const krwBeforeFee = trxAfterNetworkFee * withdrawPriceInfo.trxKrwPrice;
+    const estimatedKrw = krwBeforeFee * (1 - withdrawPriceInfo.upbitTradeRate);
+    
+    // 수수료 상세
+    const binanceFeeUsdt = usdtAmount * withdrawPriceInfo.binanceTradeRate;
+    const networkFeeKrw = withdrawPriceInfo.networkFeeTrx * withdrawPriceInfo.trxKrwPrice;
+    const upbitFeeKrw = krwBeforeFee * withdrawPriceInfo.upbitTradeRate;
+    const totalFeeKrw = (binanceFeeUsdt * withdrawPriceInfo.trxKrwPrice / withdrawPriceInfo.trxUsdtPrice) 
+                        + networkFeeKrw + upbitFeeKrw;
+    
+    // UI 업데이트
+    estimateDiv.classList.remove('d-none');
+    estimateDiv.innerHTML = `
+        <div class="estimate-info">
+            <div class="row mb-2">
+                <div class="col-12">
+                    <div class="estimate-label text-success fw-bold">예상 수령액</div>
+                    <div class="estimate-value fs-5 text-success fw-bold">≈ ${formatNumber(Math.floor(estimatedKrw))}원</div>
+                </div>
+            </div>
+            <hr class="my-2">
+            <div class="row small text-muted">
+                <div class="col-12 mb-1">
+                    <i class="bi bi-info-circle"></i> 수수료 내역
+                </div>
+                <div class="col-6">Binance 거래 (0.1%)</div>
+                <div class="col-6 text-end">≈ ${formatNumber(binanceFeeUsdt.toFixed(4))} USDT</div>
+                <div class="col-6">네트워크 수수료</div>
+                <div class="col-6 text-end">1 TRX (≈ ${formatNumber(Math.floor(networkFeeKrw))}원)</div>
+                <div class="col-6">Upbit 거래 (0.05%)</div>
+                <div class="col-6 text-end">≈ ${formatNumber(Math.floor(upbitFeeKrw))}원</div>
+                <div class="col-6 fw-bold">총 예상 수수료</div>
+                <div class="col-6 text-end fw-bold text-danger">≈ ${formatNumber(Math.floor(totalFeeKrw))}원</div>
+            </div>
+            <div class="row small text-muted mt-2">
+                <div class="col-12">
+                    <i class="bi bi-exclamation-triangle"></i> 실제 금액은 환율 변동에 따라 달라질 수 있습니다.
+                </div>
+            </div>
+        </div>
+    `;
 }
 
 // =========================================================================

@@ -526,6 +526,184 @@ class TestJournalEntryBuilderBalanceChanged:
         assert entry is None
 
 
+class TestJournalEntryBuilderDustConverted:
+    """DustConverted 분개 생성 테스트"""
+    
+    @pytest.fixture
+    def mock_ledger_store(self) -> MagicMock:
+        """Mock LedgerStore"""
+        store = MagicMock()
+        store.ensure_asset_account = AsyncMock(return_value="ASSET:BINANCE_SPOT:BNB")
+        return store
+    
+    @pytest.fixture
+    def builder(self, mock_ledger_store: MagicMock) -> JournalEntryBuilder:
+        """JournalEntryBuilder with mock store and BNB price cache"""
+        builder = JournalEntryBuilder(ledger_store=mock_ledger_store)
+        # BNB 가격 캐시 설정 (환율 조회 실패 방지)
+        builder.set_price("BNBUSDT", Decimal("600"))
+        return builder
+    
+    @pytest.fixture
+    def dust_converted_event(self) -> Event:
+        """Dust 전환 이벤트 (USDT → BNB)"""
+        return Event(
+            event_id="evt_dust_001",
+            event_type=EventTypes.DUST_CONVERTED,
+            ts=datetime.now(timezone.utc),
+            correlation_id="corr_dust",
+            causation_id=None,
+            command_id=None,
+            source="BOT",
+            entity_kind="DUST",
+            entity_id="308145879259",
+            scope=Scope.create(venue="SPOT", mode="PRODUCTION"),
+            dedup_key="BINANCE:dust:308145879259",
+            payload={
+                "trans_id": "308145879259",
+                "operate_time": 1760140871000,
+                "total_transferred_amount": "0.00093607",
+                "total_service_charge": "0.00001872",
+                "from_assets": ["USDT"],
+                "details": [
+                    {
+                        "fromAsset": "USDT",
+                        "amount": "1.03289826",
+                        "transferedAmount": "0.00093607",
+                        "serviceChargeAmount": "0.00001872",
+                        "operateTime": 1760140871000,
+                        "transId": 308145879259,
+                        "targetAsset": "BNB",
+                    }
+                ],
+                "source": "backfill",
+            },
+        )
+    
+    @pytest.mark.asyncio
+    async def test_dust_converted_creates_balanced_entry(
+        self, builder: JournalEntryBuilder, dust_converted_event: Event
+    ) -> None:
+        """Dust 전환 분개 균형 검증"""
+        entry = await builder.from_event(dust_converted_event)
+        
+        assert entry is not None
+        assert entry.is_balanced()
+        assert entry.transaction_type == "OTHER"
+    
+    @pytest.mark.asyncio
+    async def test_dust_converted_has_correct_lines(
+        self, builder: JournalEntryBuilder, dust_converted_event: Event
+    ) -> None:
+        """Dust 전환 분개 항목 검증"""
+        entry = await builder.from_event(dust_converted_event)
+        
+        assert entry is not None
+        
+        # USDT 감소 (Credit)
+        usdt_credits = [
+            line for line in entry.lines 
+            if ":USDT" in line.account_id and line.side == JournalSide.CREDIT.value
+        ]
+        assert len(usdt_credits) == 1
+        assert usdt_credits[0].amount == Decimal("1.03289826")
+        
+        # BNB 증가 (Debit) - 순액 (수수료 제외)
+        bnb_debits = [
+            line for line in entry.lines 
+            if ":BNB" in line.account_id and line.side == JournalSide.DEBIT.value
+        ]
+        assert len(bnb_debits) == 1
+        # 순액 = 0.00093607 BNB
+        assert bnb_debits[0].amount == Decimal("0.00093607")
+        
+        # 수수료 비용 (Debit)
+        fee_debits = [
+            line for line in entry.lines 
+            if "EXPENSE:FEE:DUST_CONVERSION" in line.account_id
+        ]
+        assert len(fee_debits) == 1
+        assert fee_debits[0].amount == Decimal("0.00001872")
+        
+        # 전환 손실 (Debit) - 불리한 환율로 인한 손실
+        loss_debits = [
+            line for line in entry.lines 
+            if "EXPENSE:CONVERSION_LOSS" in line.account_id
+        ]
+        assert len(loss_debits) == 1
+        # 손실 = 1.03289826 USDT - (0.00093607 * 600 + 0.00001872 * 600)
+        #      = 1.03289826 - 0.56164200 - 0.01123200
+        #      = 0.46002426 USDT
+        assert loss_debits[0].usdt_value > Decimal("0")
+    
+    @pytest.fixture
+    def dust_converted_multi_asset_event(self) -> Event:
+        """여러 자산 Dust 전환 이벤트"""
+        return Event(
+            event_id="evt_dust_002",
+            event_type=EventTypes.DUST_CONVERTED,
+            ts=datetime.now(timezone.utc),
+            correlation_id="corr_dust_multi",
+            causation_id=None,
+            command_id=None,
+            source="BOT",
+            entity_kind="DUST",
+            entity_id="308145879260",
+            scope=Scope.create(venue="SPOT", mode="PRODUCTION"),
+            dedup_key="BINANCE:dust:308145879260",
+            payload={
+                "trans_id": "308145879260",
+                "operate_time": 1760140871000,
+                "total_transferred_amount": "0.002",
+                "total_service_charge": "0.00004",
+                "from_assets": ["USDT", "USDC"],
+                "details": [
+                    {
+                        "fromAsset": "USDT",
+                        "amount": "0.5",
+                        "transferedAmount": "0.001",
+                        "serviceChargeAmount": "0.00002",
+                        "targetAsset": "BNB",
+                    },
+                    {
+                        "fromAsset": "USDC",
+                        "amount": "0.5",
+                        "transferedAmount": "0.001",
+                        "serviceChargeAmount": "0.00002",
+                        "targetAsset": "BNB",
+                    },
+                ],
+                "source": "backfill",
+            },
+        )
+    
+    @pytest.mark.asyncio
+    async def test_dust_converted_multi_asset(
+        self, builder: JournalEntryBuilder, dust_converted_multi_asset_event: Event
+    ) -> None:
+        """여러 자산 Dust 전환 분개"""
+        entry = await builder.from_event(dust_converted_multi_asset_event)
+        
+        assert entry is not None
+        assert entry.is_balanced()
+        
+        # USDT, USDC 각각 Credit
+        usdt_credits = [
+            line for line in entry.lines 
+            if ":USDT" in line.account_id and line.side == JournalSide.CREDIT.value
+        ]
+        usdc_credits = [
+            line for line in entry.lines 
+            if ":USDC" in line.account_id and line.side == JournalSide.CREDIT.value
+        ]
+        
+        assert len(usdt_credits) == 1
+        assert usdt_credits[0].amount == Decimal("0.5")
+        
+        assert len(usdc_credits) == 1
+        assert usdc_credits[0].amount == Decimal("0.5")
+
+
 class TestJournalEntryBuilderPriceCache:
     """가격 캐시 테스트"""
     
@@ -553,3 +731,109 @@ class TestJournalEntryBuilderPriceCache:
         rate = await builder._get_usdt_rate("BTC", datetime.now(timezone.utc))
         
         assert rate == Decimal("45000")
+
+
+class TestJournalEntryBuilderHistoricalPricing:
+    """과거 환율 조회 테스트"""
+    
+    @pytest.mark.asyncio
+    async def test_get_usdt_rate_from_rest_client(self) -> None:
+        """REST 클라이언트로 과거 환율 조회"""
+        from unittest.mock import AsyncMock
+        
+        mock_rest_client = AsyncMock()
+        mock_rest_client.get_klines.return_value = [
+            {"close": "550.25"}
+        ]
+        
+        builder = JournalEntryBuilder(rest_client=mock_rest_client)
+        
+        ts = datetime.now(timezone.utc)
+        rate = await builder._get_usdt_rate("BNB", ts)
+        
+        assert rate == Decimal("550.25")
+        mock_rest_client.get_klines.assert_called_once()
+        
+        call_args = mock_rest_client.get_klines.call_args
+        assert call_args.kwargs["symbol"] == "BNBUSDT"
+        assert call_args.kwargs["interval"] == "1m"
+        assert call_args.kwargs["limit"] == 1
+    
+    @pytest.mark.asyncio
+    async def test_get_usdt_rate_caches_historical_price(self) -> None:
+        """과거 환율 조회 결과가 캐시에 저장됨"""
+        from unittest.mock import AsyncMock
+        
+        mock_rest_client = AsyncMock()
+        mock_rest_client.get_klines.return_value = [
+            {"close": "42000.00"}
+        ]
+        
+        builder = JournalEntryBuilder(rest_client=mock_rest_client)
+        
+        ts = datetime.now(timezone.utc)
+        
+        rate1 = await builder._get_usdt_rate("BTC", ts)
+        rate2 = await builder._get_usdt_rate("BTC", ts)
+        
+        assert rate1 == Decimal("42000.00")
+        assert rate2 == Decimal("42000.00")
+        
+        assert mock_rest_client.get_klines.call_count == 1
+        assert "BTCUSDT" in builder._price_cache
+    
+    @pytest.mark.asyncio
+    async def test_get_usdt_rate_prefers_cache_over_api(self) -> None:
+        """캐시가 있으면 API 호출 안함"""
+        from unittest.mock import AsyncMock
+        
+        mock_rest_client = AsyncMock()
+        
+        builder = JournalEntryBuilder(rest_client=mock_rest_client)
+        builder.set_price("ETHUSDT", Decimal("3500.00"))
+        
+        ts = datetime.now(timezone.utc)
+        rate = await builder._get_usdt_rate("ETH", ts)
+        
+        assert rate == Decimal("3500.00")
+        mock_rest_client.get_klines.assert_not_called()
+    
+    @pytest.mark.asyncio
+    async def test_get_usdt_rate_fallback_on_api_error(self) -> None:
+        """API 에러 시 기본값 1 반환"""
+        from unittest.mock import AsyncMock
+        
+        mock_rest_client = AsyncMock()
+        mock_rest_client.get_klines.side_effect = Exception("API Error")
+        
+        builder = JournalEntryBuilder(rest_client=mock_rest_client)
+        
+        ts = datetime.now(timezone.utc)
+        rate = await builder._get_usdt_rate("BNB", ts)
+        
+        assert rate == Decimal("1")
+    
+    @pytest.mark.asyncio
+    async def test_get_usdt_rate_fallback_on_empty_result(self) -> None:
+        """API 결과가 비어있으면 기본값 1 반환"""
+        from unittest.mock import AsyncMock
+        
+        mock_rest_client = AsyncMock()
+        mock_rest_client.get_klines.return_value = []
+        
+        builder = JournalEntryBuilder(rest_client=mock_rest_client)
+        
+        ts = datetime.now(timezone.utc)
+        rate = await builder._get_usdt_rate("DOGE", ts)
+        
+        assert rate == Decimal("1")
+    
+    @pytest.mark.asyncio
+    async def test_get_usdt_rate_without_rest_client(self) -> None:
+        """REST 클라이언트 없이 캐시 미스 시 기본값 1 반환"""
+        builder = JournalEntryBuilder()
+        
+        ts = datetime.now(timezone.utc)
+        rate = await builder._get_usdt_rate("SOL", ts)
+        
+        assert rate == Decimal("1")

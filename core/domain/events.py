@@ -215,6 +215,21 @@ class EventTypes:
     BNB_REPLENISH_COMPLETED: str = "BnbReplenishCompleted"
     BNB_REPLENISH_FAILED: str = "BnbReplenishFailed"
 
+    # Initial Capital (과거 데이터 복구용)
+    INITIAL_CAPITAL_ESTABLISHED: str = "InitialCapitalEstablished"
+
+    # Convert (간편 전환)
+    CONVERT_EXECUTED: str = "ConvertExecuted"
+
+    # Commission Rebate (수수료 리베이트)
+    COMMISSION_REBATE_RECEIVED: str = "CommissionRebateReceived"
+
+    # Dust (소액 자산 전환)
+    DUST_CONVERTED: str = "DustConverted"
+
+    # Opening Balance Adjustment (기초 잔액 조정)
+    OPENING_BALANCE_ADJUSTED: str = "OpeningBalanceAdjusted"
+
     @classmethod
     def all_types(cls) -> list[str]:
         """모든 이벤트 타입 목록 반환"""

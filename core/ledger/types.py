@@ -97,17 +97,21 @@ INITIAL_ACCOUNTS: list[tuple[str, str, str, str | None, str]] = [
     ("EXPENSE:FEE:FUNDING:PAID", "EXPENSE", "SYSTEM", None, "Funding Fee Paid"),
     ("EXPENSE:FEE:WITHDRAWAL", "EXPENSE", "SYSTEM", None, "Withdrawal Fee"),
     ("EXPENSE:FEE:NETWORK", "EXPENSE", "SYSTEM", None, "Network Fee"),
+    ("EXPENSE:FEE:DUST_CONVERSION", "EXPENSE", "SYSTEM", None, "Dust Conversion Fee"),
+    ("EXPENSE:CONVERSION_LOSS", "EXPENSE", "SYSTEM", None, "Conversion Loss"),
     
     # INCOME 계정 - 수익
     ("INCOME:TRADING:REALIZED_PNL", "INCOME", "SYSTEM", None, "Realized PnL"),
     ("INCOME:FUNDING:RECEIVED", "INCOME", "SYSTEM", None, "Funding Fee Received"),
     ("INCOME:REBATE", "INCOME", "SYSTEM", None, "Trading Rebate"),
+    ("INCOME:CONVERSION_GAIN", "INCOME", "SYSTEM", None, "Conversion Gain"),
     
     # EQUITY 계정
     ("EQUITY:INITIAL_CAPITAL", "EQUITY", "SYSTEM", None, "Initial Capital"),
     ("EQUITY:RETAINED_EARNINGS", "EQUITY", "SYSTEM", None, "Retained Earnings"),
     ("EQUITY:SUSPENSE", "EQUITY", "SYSTEM", None, "Suspense Account"),  # 미결 계정
     ("EQUITY:ADJUSTMENT", "EQUITY", "SYSTEM", None, "Adjustment Account"),  # 조정 계정
+    ("EQUITY:OPENING_ADJUSTMENT", "EQUITY", "SYSTEM", None, "Opening Balance Adjustment"),  # 기초 잔액 조정
     
     # UNKNOWN 계정 - 동적 생성 전 임시 사용
     ("ASSET:BINANCE_SPOT:UNKNOWN", "ASSET", "BINANCE_SPOT", "UNKNOWN", "Unknown Spot Asset"),

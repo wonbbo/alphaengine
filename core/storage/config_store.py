@@ -79,6 +79,12 @@ DEFAULT_CONFIGS: dict[str, dict[str, Any]] = {
         "min_trigger_usdt": "10",  # 최소 트리거 금액 (USDT 환산)
         "check_interval_sec": 3600,  # 체크 주기 (1시간)
     },
+    "price_cache": {
+        # 실시간 가격 캐시 (Bot에서 저장, Web에서 조회)
+        # 형식: {"BNBUSDT": "629.50", "BTCUSDT": "100000", ...}
+        "prices": {},
+        "updated_at": None,  # 마지막 업데이트 시간 (ISO 형식)
+    },
 }
 
 
@@ -431,6 +437,63 @@ class ConfigStore:
         current["strategy_running"] = False
         current["last_heartbeat"] = datetime.now(timezone.utc).isoformat()
         return await self.set("bot_status", current, updated_by="bot:shutdown")
+    
+    # -------------------------------------------------------------------------
+    # 가격 캐시 관련 메서드
+    # -------------------------------------------------------------------------
+    
+    async def update_price_cache(
+        self,
+        prices: dict[str, str],
+    ) -> bool:
+        """가격 캐시 업데이트 (Bot에서 호출)
+        
+        WebSocket에서 받은 실시간 가격을 저장.
+        기존 가격과 병합하여 저장.
+        
+        Args:
+            prices: 심볼별 가격 {"BNBUSDT": "629.50", "BTCUSDT": "100000"}
+            
+        Returns:
+            성공 여부
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        
+        # 기존 캐시 가져오기
+        current = await self.get("price_cache", use_cache=False)
+        current_prices = current.get("prices", {})
+        
+        # 새 가격 병합
+        current_prices.update(prices)
+        
+        cache_data = {
+            "prices": current_prices,
+            "updated_at": now,
+        }
+        
+        return await self.set("price_cache", cache_data, updated_by="bot:price")
+    
+    async def get_price(self, symbol: str) -> str | None:
+        """특정 심볼의 캐시된 가격 조회
+        
+        Args:
+            symbol: 심볼 (예: BNBUSDT)
+            
+        Returns:
+            가격 문자열 또는 None
+        """
+        cache = await self.get("price_cache")
+        prices = cache.get("prices", {})
+        return prices.get(symbol)
+    
+    async def get_all_prices(self) -> dict[str, str]:
+        """모든 캐시된 가격 조회
+        
+        Returns:
+            심볼별 가격 딕셔너리
+        """
+        cache = await self.get("price_cache")
+        return cache.get("prices", {})
 
 
 async def init_default_configs(db: SQLiteAdapter) -> None:

@@ -425,4 +425,8 @@ async def init_schema(adapter: SQLiteAdapter) -> None:
     
     await adapter.commit()
     
-    logger.info("스키마 초기화 완료")
+    logger.info("기본 스키마 초기화 완료")
+    
+    # Ledger 스키마 (복식부기 테이블 + View) 초기화
+    from core.ledger.schema import init_ledger_schema
+    await init_ledger_schema(adapter)

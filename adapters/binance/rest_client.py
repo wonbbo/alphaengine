@@ -1071,6 +1071,306 @@ class BinanceRestClient:
         return None
     
     # -------------------------------------------------------------------------
+    # 과거 데이터 복구용 API
+    # -------------------------------------------------------------------------
+    
+    async def get_account_snapshot(
+        self,
+        account_type: str,
+        start_time: int | None = None,
+        end_time: int | None = None,
+        limit: int = 7,
+    ) -> dict[str, Any]:
+        """Daily Account Snapshot 조회
+        
+        일별 계좌 스냅샷을 조회합니다. 과거 특정 날짜의 자산 상태 확인용.
+        
+        Args:
+            account_type: 계좌 유형 ("SPOT", "MARGIN", "FUTURES")
+            start_time: 조회 시작 시간 (밀리초 타임스탬프)
+            end_time: 조회 종료 시간 (밀리초 타임스탬프)
+            limit: 조회 개수 (7-30, 기본 7)
+            
+        Returns:
+            스냅샷 응답:
+            {
+                "code": 200,
+                "msg": "",
+                "snapshotVos": [
+                    {
+                        "type": "spot|futures",
+                        "updateTime": 1576281599000,
+                        "data": {...}
+                    }
+                ]
+            }
+            
+        Note:
+            - Weight: 2400 (매우 높음)
+            - 최대 30일 전까지만 조회 가능
+            - 초기화 시 1회만 호출 권장
+        """
+        params: dict[str, Any] = {
+            "type": account_type.upper(),
+            "limit": min(max(limit, 7), 30),
+        }
+        
+        if start_time:
+            params["startTime"] = start_time
+        if end_time:
+            params["endTime"] = end_time
+        
+        data = await self._spot_request(
+            "GET",
+            "/sapi/v1/accountSnapshot",
+            params=params,
+            signed=True,
+        )
+        
+        return data
+    
+    async def get_income_history(
+        self,
+        symbol: str | None = None,
+        income_type: str | None = None,
+        start_time: int | None = None,
+        end_time: int | None = None,
+        limit: int = 1000,
+    ) -> list[dict[str, Any]]:
+        """Futures Income History 조회
+        
+        손익, 수수료, 펀딩비 등 모든 수익/비용 이력을 조회합니다.
+        
+        Args:
+            symbol: 특정 심볼 필터 (선택)
+            income_type: 수익 유형 필터 (선택)
+                - TRANSFER: 내부 이체
+                - REALIZED_PNL: 실현 손익
+                - FUNDING_FEE: 펀딩비
+                - COMMISSION: 거래 수수료
+                - COMMISSION_REBATE: 수수료 리베이트
+            start_time: 조회 시작 시간 (밀리초 타임스탬프)
+            end_time: 조회 종료 시간 (밀리초 타임스탬프)
+            limit: 조회 개수 (기본 100, 최대 1000)
+            
+        Returns:
+            Income 이력 리스트:
+            [
+                {
+                    "symbol": "BTCUSDT",
+                    "incomeType": "REALIZED_PNL",
+                    "income": "1.23456789",
+                    "asset": "USDT",
+                    "info": "",
+                    "time": 1570636800000,
+                    "tranId": 9689322392,
+                    "tradeId": ""
+                }
+            ]
+            
+        Note:
+            - Weight: 100 (IP)
+            - 페이지네이션: startTime 기준 limit건 반환
+        """
+        params: dict[str, Any] = {
+            "limit": min(limit, 1000),
+        }
+        
+        if symbol:
+            params["symbol"] = symbol
+        if income_type:
+            params["incomeType"] = income_type
+        if start_time:
+            params["startTime"] = start_time
+        if end_time:
+            params["endTime"] = end_time
+        
+        data = await self._request(
+            "GET",
+            "/fapi/v1/income",
+            params=params,
+            signed=True,
+        )
+        
+        return data
+    
+    async def get_transfer_history(
+        self,
+        transfer_type: str,
+        start_time: int | None = None,
+        end_time: int | None = None,
+        current: int = 1,
+        size: int = 100,
+    ) -> dict[str, Any]:
+        """SPOT ↔ FUTURES 이체 이력 조회
+        
+        Args:
+            transfer_type: 이체 유형
+                - MAIN_UMFUTURE: SPOT → USDT-M Futures
+                - UMFUTURE_MAIN: USDT-M Futures → SPOT
+            start_time: 조회 시작 시간 (밀리초 타임스탬프)
+            end_time: 조회 종료 시간 (밀리초 타임스탬프)
+            current: 페이지 번호 (기본 1)
+            size: 페이지 크기 (기본 10, 최대 100)
+            
+        Returns:
+            이체 이력:
+            {
+                "total": 2,
+                "rows": [
+                    {
+                        "asset": "USDT",
+                        "amount": "100.00000000",
+                        "type": "MAIN_UMFUTURE",
+                        "status": "CONFIRMED",
+                        "tranId": 11415955596,
+                        "timestamp": 1544433328000
+                    }
+                ]
+            }
+            
+        Note:
+            - Weight: 1 (IP)
+            - 최대 6개월 전까지 조회 가능
+            - startTime/endTime 미지정 시 최근 7일 반환
+        """
+        params: dict[str, Any] = {
+            "type": transfer_type,
+            "current": current,
+            "size": min(size, 100),
+        }
+        
+        if start_time:
+            params["startTime"] = start_time
+        if end_time:
+            params["endTime"] = end_time
+        
+        data = await self._spot_request(
+            "GET",
+            "/sapi/v1/asset/transfer",
+            params=params,
+            signed=True,
+        )
+        
+        return data
+    
+    async def get_convert_history(
+        self,
+        start_time: int,
+        end_time: int,
+        limit: int = 100,
+    ) -> dict[str, Any]:
+        """Convert(간편 전환) 거래 이력 조회
+        
+        Args:
+            start_time: 조회 시작 시간 (밀리초 타임스탬프, 필수)
+            end_time: 조회 종료 시간 (밀리초 타임스탬프, 필수)
+            limit: 조회 개수 (기본 100, 최대 1000)
+            
+        Returns:
+            Convert 거래 이력:
+            {
+                "list": [
+                    {
+                        "quoteId": "f3b91c525b2644c7bc1e1cd31b6e1aa6",
+                        "orderId": 940708407462087195,
+                        "orderStatus": "SUCCESS",
+                        "fromAsset": "USDT",
+                        "fromAmount": "100.00000000",
+                        "toAsset": "BNB",
+                        "toAmount": "0.38500000",
+                        "ratio": "0.00385000",
+                        "inverseRatio": "259.74025974",
+                        "createTime": 1623381330000
+                    }
+                ],
+                "startTime": 1623381330000,
+                "endTime": 1623470000000,
+                "limit": 100,
+                "moreData": false
+            }
+            
+        Note:
+            - Weight: 3000 (UID) - 높음
+            - startTime, endTime 모두 필수
+            - 조회 간격 최대 30일
+        """
+        params: dict[str, Any] = {
+            "startTime": start_time,
+            "endTime": end_time,
+            "limit": min(limit, 1000),
+        }
+        
+        data = await self._spot_request(
+            "GET",
+            "/sapi/v1/convert/tradeFlow",
+            params=params,
+            signed=True,
+        )
+        
+        return data
+    
+    async def get_dust_log(
+        self,
+        account_type: str = "SPOT",
+        start_time: int | None = None,
+        end_time: int | None = None,
+    ) -> dict[str, Any]:
+        """Dust(소액 자산) → BNB 전환 이력 조회
+        
+        Args:
+            account_type: 계좌 유형 ("SPOT" 또는 "MARGIN", 기본 SPOT)
+            start_time: 조회 시작 시간 (밀리초 타임스탬프)
+            end_time: 조회 종료 시간 (밀리초 타임스탬프)
+            
+        Returns:
+            Dust 전환 이력:
+            {
+                "total": 8,
+                "userAssetDribblets": [
+                    {
+                        "operateTime": 1615985535000,
+                        "totalTransferedAmount": "0.00132256",
+                        "totalServiceChargeAmount": "0.00002654",
+                        "transId": 45178372831,
+                        "userAssetDribbletDetails": [
+                            {
+                                "transId": 4359321,
+                                "serviceChargeAmount": "0.000009",
+                                "amount": "0.0009",
+                                "operateTime": 1615985535000,
+                                "transferedAmount": "0.000441",
+                                "fromAsset": "ATOM"
+                            }
+                        ]
+                    }
+                ]
+            }
+            
+        Note:
+            - Weight: 1 (IP)
+            - 2020/12/01 이후 기록만 반환
+            - 최근 100건만 반환
+        """
+        params: dict[str, Any] = {
+            "accountType": account_type.upper(),
+        }
+        
+        if start_time:
+            params["startTime"] = start_time
+        if end_time:
+            params["endTime"] = end_time
+        
+        data = await self._spot_request(
+            "GET",
+            "/sapi/v1/asset/dribblet",
+            params=params,
+            signed=True,
+        )
+        
+        return data
+    
+    # -------------------------------------------------------------------------
     # 컨텍스트 매니저
     # -------------------------------------------------------------------------
     

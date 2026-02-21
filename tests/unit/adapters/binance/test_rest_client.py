@@ -458,3 +458,361 @@ class TestBinanceRestClientKlines:
             
             assert result["symbol"] == "XRPUSDT"
             assert result["price"] == "0.5123"
+
+
+class TestBinanceRestClientAccountSnapshot:
+    """Daily Account Snapshot 조회 테스트"""
+    
+    @pytest.mark.asyncio
+    async def test_get_account_snapshot_spot_success(self) -> None:
+        """SPOT 계좌 스냅샷 조회 성공"""
+        client = BinanceRestClient(
+            base_url="https://fapi.binance.com",
+            api_key="test_key",
+            api_secret="test_secret",
+        )
+        client._time_synced = True
+        
+        mock_snapshot_response = {
+            "code": 200,
+            "msg": "",
+            "snapshotVos": [
+                {
+                    "type": "spot",
+                    "updateTime": 1576281599000,
+                    "data": {
+                        "totalAssetOfBtc": "0.09942700",
+                        "balances": [
+                            {"asset": "USDT", "free": "100.50", "locked": "0"},
+                            {"asset": "BNB", "free": "1.5", "locked": "0"},
+                        ]
+                    }
+                }
+            ]
+        }
+        
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = mock_snapshot_response
+        mock_response.headers = {}
+        
+        with patch.object(client, "_get_client") as mock_get_client:
+            mock_http_client = AsyncMock()
+            mock_http_client.request.return_value = mock_response
+            mock_get_client.return_value = mock_http_client
+            
+            result = await client.get_account_snapshot(account_type="SPOT", limit=7)
+            
+            assert result["code"] == 200
+            assert len(result["snapshotVos"]) == 1
+            assert result["snapshotVos"][0]["type"] == "spot"
+            
+            balances = result["snapshotVos"][0]["data"]["balances"]
+            assert len(balances) == 2
+            assert balances[0]["asset"] == "USDT"
+    
+    @pytest.mark.asyncio
+    async def test_get_account_snapshot_futures_success(self) -> None:
+        """FUTURES 계좌 스냅샷 조회 성공"""
+        client = BinanceRestClient(
+            base_url="https://fapi.binance.com",
+            api_key="test_key",
+            api_secret="test_secret",
+        )
+        client._time_synced = True
+        
+        mock_snapshot_response = {
+            "code": 200,
+            "msg": "",
+            "snapshotVos": [
+                {
+                    "type": "futures",
+                    "updateTime": 1576281599000,
+                    "data": {
+                        "assets": [
+                            {
+                                "asset": "USDT",
+                                "marginBalance": "118.99782335",
+                                "walletBalance": "120.23811389"
+                            }
+                        ],
+                        "position": []
+                    }
+                }
+            ]
+        }
+        
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = mock_snapshot_response
+        mock_response.headers = {}
+        
+        with patch.object(client, "_get_client") as mock_get_client:
+            mock_http_client = AsyncMock()
+            mock_http_client.request.return_value = mock_response
+            mock_get_client.return_value = mock_http_client
+            
+            result = await client.get_account_snapshot(
+                account_type="FUTURES",
+                start_time=1576000000000,
+                end_time=1576300000000,
+            )
+            
+            assert result["code"] == 200
+            assets = result["snapshotVos"][0]["data"]["assets"]
+            assert assets[0]["walletBalance"] == "120.23811389"
+
+
+class TestBinanceRestClientIncomeHistory:
+    """Income History 조회 테스트"""
+    
+    @pytest.mark.asyncio
+    async def test_get_income_history_success(self) -> None:
+        """Income History 조회 성공"""
+        client = BinanceRestClient(
+            base_url="https://fapi.binance.com",
+            api_key="test_key",
+            api_secret="test_secret",
+        )
+        client._time_synced = True
+        
+        mock_income_data = [
+            {
+                "symbol": "BTCUSDT",
+                "incomeType": "REALIZED_PNL",
+                "income": "1.23456789",
+                "asset": "USDT",
+                "info": "",
+                "time": 1570636800000,
+                "tranId": 9689322392,
+                "tradeId": ""
+            },
+            {
+                "symbol": "BTCUSDT",
+                "incomeType": "FUNDING_FEE",
+                "income": "-0.01234567",
+                "asset": "USDT",
+                "info": "",
+                "time": 1570665600000,
+                "tranId": 9689322393,
+                "tradeId": ""
+            },
+        ]
+        
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = mock_income_data
+        mock_response.headers = {}
+        
+        with patch.object(client, "_get_client") as mock_get_client:
+            mock_http_client = AsyncMock()
+            mock_http_client.request.return_value = mock_response
+            mock_get_client.return_value = mock_http_client
+            
+            result = await client.get_income_history(limit=100)
+            
+            assert len(result) == 2
+            assert result[0]["incomeType"] == "REALIZED_PNL"
+            assert result[1]["incomeType"] == "FUNDING_FEE"
+    
+    @pytest.mark.asyncio
+    async def test_get_income_history_with_filters(self) -> None:
+        """Income History 필터 파라미터 전달 확인"""
+        client = BinanceRestClient(
+            base_url="https://fapi.binance.com",
+            api_key="test_key",
+            api_secret="test_secret",
+        )
+        client._time_synced = True
+        
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = []
+        mock_response.headers = {}
+        
+        with patch.object(client, "_get_client") as mock_get_client:
+            mock_http_client = AsyncMock()
+            mock_http_client.request.return_value = mock_response
+            mock_get_client.return_value = mock_http_client
+            
+            await client.get_income_history(
+                symbol="XRPUSDT",
+                income_type="FUNDING_FEE",
+                start_time=1640000000000,
+                end_time=1640100000000,
+                limit=500,
+            )
+            
+            call_args = mock_http_client.request.call_args
+            params = call_args.kwargs["params"]
+            
+            assert params["symbol"] == "XRPUSDT"
+            assert params["incomeType"] == "FUNDING_FEE"
+            assert params["startTime"] == 1640000000000
+            assert params["endTime"] == 1640100000000
+            assert params["limit"] == 500
+
+
+class TestBinanceRestClientTransferHistory:
+    """Transfer History 조회 테스트"""
+    
+    @pytest.mark.asyncio
+    async def test_get_transfer_history_success(self) -> None:
+        """Transfer History 조회 성공"""
+        client = BinanceRestClient(
+            base_url="https://fapi.binance.com",
+            api_key="test_key",
+            api_secret="test_secret",
+        )
+        client._time_synced = True
+        
+        mock_transfer_data = {
+            "total": 2,
+            "rows": [
+                {
+                    "asset": "USDT",
+                    "amount": "100.00000000",
+                    "type": "MAIN_UMFUTURE",
+                    "status": "CONFIRMED",
+                    "tranId": 11415955596,
+                    "timestamp": 1544433328000
+                },
+                {
+                    "asset": "USDT",
+                    "amount": "50.00000000",
+                    "type": "UMFUTURE_MAIN",
+                    "status": "CONFIRMED",
+                    "tranId": 11415955597,
+                    "timestamp": 1544433329000
+                }
+            ]
+        }
+        
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = mock_transfer_data
+        mock_response.headers = {}
+        
+        with patch.object(client, "_get_client") as mock_get_client:
+            mock_http_client = AsyncMock()
+            mock_http_client.request.return_value = mock_response
+            mock_get_client.return_value = mock_http_client
+            
+            result = await client.get_transfer_history(
+                transfer_type="MAIN_UMFUTURE",
+                size=100,
+            )
+            
+            assert result["total"] == 2
+            assert len(result["rows"]) == 2
+            assert result["rows"][0]["type"] == "MAIN_UMFUTURE"
+
+
+class TestBinanceRestClientConvertHistory:
+    """Convert Trade History 조회 테스트"""
+    
+    @pytest.mark.asyncio
+    async def test_get_convert_history_success(self) -> None:
+        """Convert History 조회 성공"""
+        client = BinanceRestClient(
+            base_url="https://fapi.binance.com",
+            api_key="test_key",
+            api_secret="test_secret",
+        )
+        client._time_synced = True
+        
+        mock_convert_data = {
+            "list": [
+                {
+                    "quoteId": "f3b91c525b2644c7bc1e1cd31b6e1aa6",
+                    "orderId": 940708407462087195,
+                    "orderStatus": "SUCCESS",
+                    "fromAsset": "USDT",
+                    "fromAmount": "100.00000000",
+                    "toAsset": "BNB",
+                    "toAmount": "0.38500000",
+                    "ratio": "0.00385000",
+                    "inverseRatio": "259.74025974",
+                    "createTime": 1623381330000
+                }
+            ],
+            "startTime": 1623381330000,
+            "endTime": 1623470000000,
+            "limit": 100,
+            "moreData": False
+        }
+        
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = mock_convert_data
+        mock_response.headers = {}
+        
+        with patch.object(client, "_get_client") as mock_get_client:
+            mock_http_client = AsyncMock()
+            mock_http_client.request.return_value = mock_response
+            mock_get_client.return_value = mock_http_client
+            
+            result = await client.get_convert_history(
+                start_time=1623381330000,
+                end_time=1623470000000,
+            )
+            
+            assert len(result["list"]) == 1
+            convert = result["list"][0]
+            assert convert["fromAsset"] == "USDT"
+            assert convert["toAsset"] == "BNB"
+            assert convert["orderStatus"] == "SUCCESS"
+
+
+class TestBinanceRestClientDustLog:
+    """Dust Log 조회 테스트"""
+    
+    @pytest.mark.asyncio
+    async def test_get_dust_log_success(self) -> None:
+        """Dust Log 조회 성공"""
+        client = BinanceRestClient(
+            base_url="https://fapi.binance.com",
+            api_key="test_key",
+            api_secret="test_secret",
+        )
+        client._time_synced = True
+        
+        mock_dust_data = {
+            "total": 1,
+            "userAssetDribblets": [
+                {
+                    "operateTime": 1615985535000,
+                    "totalTransferedAmount": "0.00132256",
+                    "totalServiceChargeAmount": "0.00002654",
+                    "transId": 45178372831,
+                    "userAssetDribbletDetails": [
+                        {
+                            "transId": 4359321,
+                            "serviceChargeAmount": "0.000009",
+                            "amount": "0.0009",
+                            "operateTime": 1615985535000,
+                            "transferedAmount": "0.000441",
+                            "fromAsset": "ATOM"
+                        }
+                    ]
+                }
+            ]
+        }
+        
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = mock_dust_data
+        mock_response.headers = {}
+        
+        with patch.object(client, "_get_client") as mock_get_client:
+            mock_http_client = AsyncMock()
+            mock_http_client.request.return_value = mock_response
+            mock_get_client.return_value = mock_http_client
+            
+            result = await client.get_dust_log()
+            
+            assert result["total"] == 1
+            dribblet = result["userAssetDribblets"][0]
+            assert dribblet["transId"] == 45178372831
+            assert len(dribblet["userAssetDribbletDetails"]) == 1
+            assert dribblet["userAssetDribbletDetails"][0]["fromAsset"] == "ATOM"

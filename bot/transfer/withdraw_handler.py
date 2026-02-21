@@ -336,6 +336,7 @@ class WithdrawHandler:
         """출금 가능 상태 조회
         
         Binance Futures 잔고 및 포지션 확인.
+        예상 수수료 및 수령 금액 정보 포함.
         
         Returns:
             출금 상태 정보
@@ -358,6 +359,9 @@ class WithdrawHandler:
         
         can_withdraw = usdt_balance >= min_withdraw
         
+        # 시세 정보 조회 (예상 금액 계산용)
+        price_info = await self._get_price_info()
+        
         return {
             "can_withdraw": can_withdraw,
             "usdt_balance": str(usdt_balance),
@@ -365,4 +369,39 @@ class WithdrawHandler:
             "position_count": len(positions),
             "min_withdraw_usdt": str(min_withdraw),
             "warning": "포지션이 있으면 출금 시 주의가 필요합니다." if has_position else None,
+            # 예상 출금 계산용 시세 정보
+            "trx_usdt_price": price_info["trx_usdt_price"],
+            "trx_krw_price": price_info["trx_krw_price"],
+            "network_fee_trx": "1",  # Binance TRX 출금 수수료
+            "binance_trade_fee_rate": "0.001",  # Binance 거래 수수료 0.1%
+            "upbit_trade_fee_rate": "0.0005",  # Upbit 거래 수수료 0.05%
+        }
+    
+    async def _get_price_info(self) -> dict[str, str]:
+        """TRX 시세 정보 조회
+        
+        Returns:
+            TRX/USDT, TRX/KRW 가격 정보
+        """
+        trx_usdt_price = "0"
+        trx_krw_price = "0"
+        
+        try:
+            # Binance TRX/USDT 가격
+            ticker = await self.binance.get_ticker_price("TRXUSDT")
+            trx_usdt_price = ticker.get("price", "0")
+        except Exception as e:
+            logger.warning(f"Failed to get TRX/USDT price: {e}")
+        
+        try:
+            # Upbit TRX/KRW 가격
+            ticker = await self.upbit.get_ticker("KRW-TRX")
+            if ticker:
+                trx_krw_price = str(ticker.trade_price)
+        except Exception as e:
+            logger.warning(f"Failed to get TRX/KRW price: {e}")
+        
+        return {
+            "trx_usdt_price": trx_usdt_price,
+            "trx_krw_price": trx_krw_price,
         }

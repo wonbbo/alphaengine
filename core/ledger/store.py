@@ -254,17 +254,31 @@ class LedgerStore:
             (scope_mode,),
         )
         
-        return [
-            {
+        # EQUITY, LIABILITY, INCOME 계정은 Credit이 증가이므로
+        # UI에서 양수로 표시하려면 부호를 반전해야 함
+        credit_normal_types = {"EQUITY", "LIABILITY", "INCOME"}
+        
+        result = []
+        for row in rows:
+            account_type = row[1]
+            balance = float(row[5]) if row[5] else 0.0
+            
+            # Credit이 증가인 계정은 부호 반전 (음수 → 양수로 표시)
+            if account_type in credit_normal_types:
+                display_balance = -balance
+            else:
+                display_balance = balance
+            
+            result.append({
                 "account_id": row[0],
-                "account_type": row[1],
+                "account_type": account_type,
                 "venue": row[2],
                 "asset": row[3],
                 "name": row[4],
-                "balance": row[5],
-            }
-            for row in rows
-        ]
+                "balance": display_balance,
+            })
+        
+        return result
     
     async def get_entries_by_account(
         self,
