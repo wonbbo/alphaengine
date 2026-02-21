@@ -13,29 +13,12 @@ SMA Cross Strategy (교육용 단순 예제)
 """
 
 import logging
-from decimal import Decimal
 from typing import Any
 
-from strategies.base import Strategy, StrategyTickContext, CommandEmitter, Bar
+from strategies.base import Strategy, StrategyTickContext, CommandEmitter
+from strategies.indicators import sma
 
 logger = logging.getLogger(__name__)
-
-
-def calculate_sma(bars: list[Bar], period: int) -> Decimal | None:
-    """단순 이동평균 계산
-    
-    Args:
-        bars: 캔들스틱 리스트 (최신이 마지막)
-        period: 기간
-        
-    Returns:
-        SMA 값 또는 None (데이터 부족 시)
-    """
-    if len(bars) < period:
-        return None
-    
-    closes = [bar.close for bar in bars[-period:]]
-    return sum(closes) / Decimal(period)
 
 
 class SmaCrossStrategy(Strategy):
@@ -64,7 +47,7 @@ class SmaCrossStrategy(Strategy):
     
     @property
     def version(self) -> str:
-        return "1.1.0"
+        return "2.0.0"
     
     @property
     def description(self) -> str:
@@ -75,7 +58,7 @@ class SmaCrossStrategy(Strategy):
         return {
             "fast_period": 5,
             "slow_period": 20,
-            "fixed_quantity": "10",  # 교육용 고정 수량
+            "fixed_quantity": "10",
             "use_market_order": True,
         }
     
@@ -111,22 +94,29 @@ class SmaCrossStrategy(Strategy):
             logger.debug("Engine not in RUNNING mode, skipping tick")
             return
         
+        ohlcv = ctx.ohlcv
+        
         # 충분한 데이터 확인
-        if len(ctx.bars) < self.slow_period:
+        if len(ohlcv) < self.slow_period:
             logger.debug(
-                f"Not enough bars: {len(ctx.bars)} < {self.slow_period}",
+                f"Not enough OHLCV data: {len(ohlcv)} < {self.slow_period}",
             )
             return
         
-        # SMA 계산
-        fast_sma = calculate_sma(ctx.bars, self.fast_period)
-        slow_sma = calculate_sma(ctx.bars, self.slow_period)
+        # SMA 계산 (indicator 모듈 사용)
+        fast_sma_series = sma(ohlcv, {"period": self.fast_period})
+        slow_sma_series = sma(ohlcv, {"period": self.slow_period})
         
-        if fast_sma is None or slow_sma is None:
+        # 최신 값 가져오기
+        fast_sma_value = fast_sma_series.iloc[-1]
+        slow_sma_value = slow_sma_series.iloc[-1]
+        
+        # NaN 체크
+        if fast_sma_value != fast_sma_value or slow_sma_value != slow_sma_value:
             return
         
         # 현재 상태
-        fast_above = fast_sma > slow_sma
+        fast_above = fast_sma_value > slow_sma_value
         
         # 이전 상태 조회
         prev_fast_above = ctx.strategy_state.get("prev_fast_above")
@@ -136,7 +126,7 @@ class SmaCrossStrategy(Strategy):
         
         # 첫 틱이면 신호 없음
         if prev_fast_above is None:
-            logger.debug(f"First tick, fast_sma={fast_sma:.4f}, slow_sma={slow_sma:.4f}")
+            logger.debug(f"First tick, fast_sma={fast_sma_value:.4f}, slow_sma={slow_sma_value:.4f}")
             return
         
         # 교차 감지
@@ -165,8 +155,6 @@ class SmaCrossStrategy(Strategy):
         if ctx.has_position and ctx.position and ctx.position.is_short:
             logger.info("Closing short position before buy")
             await emit.close_position(reduce_only=True)
-            # 실제로는 청산 완료 후 진입해야 하지만,
-            # 간단한 예제이므로 바로 진입 주문
         
         # 매수 주문 (고정 수량 - 교육용)
         order_type = "MARKET" if self.use_market_order else "LIMIT"
@@ -217,5 +205,4 @@ class SmaCrossStrategy(Strategy):
             f"SmaCross error: {error}",
             extra={"symbol": ctx.symbol},
         )
-        # 에러 발생 시 계속 실행 (복구 시도)
         return True

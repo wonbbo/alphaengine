@@ -26,50 +26,12 @@ from strategies.base import (
     Strategy,
     StrategyTickContext,
     CommandEmitter,
-    Bar,
     TradeEvent,
     OrderEvent,
 )
+from strategies.indicators import sma, atr
 
 logger = logging.getLogger(__name__)
-
-
-def calculate_atr(bars: list[Bar], period: int) -> Decimal | None:
-    """Average True Range 계산
-    
-    Args:
-        bars: 캔들스틱 리스트 (최신이 마지막)
-        period: ATR 기간
-        
-    Returns:
-        ATR 값 또는 None (데이터 부족 시)
-    """
-    if len(bars) < period + 1:
-        return None
-    
-    true_ranges: list[Decimal] = []
-    
-    for i in range(-period, 0):
-        current = bars[i]
-        previous = bars[i - 1]
-        
-        high_low = current.high - current.low
-        high_prev_close = abs(current.high - previous.close)
-        low_prev_close = abs(current.low - previous.close)
-        
-        true_range = max(high_low, high_prev_close, low_prev_close)
-        true_ranges.append(true_range)
-    
-    return sum(true_ranges) / Decimal(period)
-
-
-def calculate_sma(bars: list[Bar], period: int) -> Decimal | None:
-    """단순 이동평균 계산"""
-    if len(bars) < period:
-        return None
-    
-    closes = [bar.close for bar in bars[-period:]]
-    return sum(closes) / Decimal(period)
 
 
 class AtrRiskManagedStrategy(Strategy):
@@ -97,7 +59,7 @@ class AtrRiskManagedStrategy(Strategy):
     
     @property
     def version(self) -> str:
-        return "1.0.0"
+        return "2.0.0"
     
     @property
     def description(self) -> str:
@@ -107,36 +69,26 @@ class AtrRiskManagedStrategy(Strategy):
     def default_params(self) -> dict[str, Any]:
         return {
             # ATR 손절 방식 파라미터 (전략별 고유)
-            "atr_period": 14,                # ATR 기간
-            "atr_multiplier": "2.0",         # 손절 = ATR × multiplier
+            "atr_period": 14,
+            "atr_multiplier": "2.0",
             
             # 진입 조건 파라미터 (SMA 크로스)
             "fast_sma_period": 5,
             "slow_sma_period": 20,
             
             # 거래소 제약 (심볼별로 다름)
-            "min_qty": "1",                  # 최소 주문 수량
-            "qty_precision": 0,              # 수량 소수점 자릿수
-            
-            # 참고: risk_per_trade, reward_ratio, partial_tp_ratio, equity_reset_trades
-            # 는 ConfigStore에서 조회 (ctx.risk_per_trade 등)
+            "min_qty": "1",
+            "qty_precision": 0,
         }
     
     async def on_init(self, params: dict[str, Any]) -> None:
-        """파라미터 초기화
-        
-        손절 방식별 파라미터는 전략 params에서 관리.
-        리스크/리워드 공통 설정은 ctx.risk_config에서 동적 조회.
-        """
-        # ATR 손절 방식 파라미터 (전략 고유)
+        """파라미터 초기화"""
         self.atr_period = int(params.get("atr_period", 14))
         self.atr_multiplier = Decimal(str(params.get("atr_multiplier", "2.0")))
         
-        # 진입 조건
         self.fast_sma_period = int(params.get("fast_sma_period", 5))
         self.slow_sma_period = int(params.get("slow_sma_period", 20))
         
-        # 거래소 제약
         self.min_qty = Decimal(str(params.get("min_qty", "1")))
         self.qty_precision = int(params.get("qty_precision", 0))
         
@@ -147,17 +99,13 @@ class AtrRiskManagedStrategy(Strategy):
         )
     
     async def on_start(self, ctx: StrategyTickContext) -> None:
-        """전략 시작 - 상태 초기화
-        
-        DB에서 복원된 상태가 있으면 유지, 없으면 현재 잔고로 초기화.
-        """
+        """전략 시작 - 상태 초기화"""
         state = ctx.strategy_state
         usdt = ctx.usdt_balance
         current_balance = usdt.total if usdt else Decimal("0")
         
-        # DB에서 복원된 account_equity가 있으면 사용, 없으면 현재 잔고로 초기화
+        # DB에서 복원된 account_equity가 있으면 사용
         if "account_equity" in state and state["account_equity"]:
-            # 복원된 값이 문자열이면 Decimal로 변환
             restored_equity = state["account_equity"]
             if isinstance(restored_equity, str):
                 restored_equity = Decimal(restored_equity)
@@ -170,7 +118,6 @@ class AtrRiskManagedStrategy(Strategy):
                 f"total_trades={state.get('total_trade_count', 0)}"
             )
         else:
-            # 신규 시작: 현재 잔고로 초기화
             state["account_equity"] = current_balance
             state["trade_count_since_reset"] = 0
             state["total_trade_count"] = 0
@@ -183,7 +130,7 @@ class AtrRiskManagedStrategy(Strategy):
         # SMA 크로스 상태 (항상 초기화)
         state["prev_fast_above"] = None
         
-        # 포지션 상태 (항상 초기화 - 포지션은 거래소에서 확인)
+        # 포지션 상태
         state["in_trade"] = False
         state["entry_price"] = None
         state["stop_loss_price"] = None
@@ -199,23 +146,22 @@ class AtrRiskManagedStrategy(Strategy):
         if not ctx.can_trade:
             return
         
+        ohlcv = ctx.ohlcv
         state = ctx.strategy_state
         
         # 데이터 충분성 검증
-        required_bars = max(self.slow_sma_period, self.atr_period + 1)
-        if len(ctx.bars) < required_bars:
+        required_rows = max(self.slow_sma_period, self.atr_period + 1)
+        if len(ohlcv) < required_rows:
             logger.debug(
-                f"Not enough bars: {len(ctx.bars)} < {required_bars}"
+                f"Not enough OHLCV data: {len(ohlcv)} < {required_rows}"
             )
             return
         
         # 포지션이 없는 경우: 진입 신호 체크
         if not ctx.has_position:
-            # 이전 거래 종료 후 상태 정리
             if state.get("in_trade"):
                 self._clear_trade_state(state)
             
-            # SMA 크로스 진입 신호 체크
             await self._check_entry_signal(ctx, emit, state)
         
         # 포지션이 있는 경우: 반대 신호 체크 (전체 청산)
@@ -231,7 +177,6 @@ class AtrRiskManagedStrategy(Strategy):
         """체결 이벤트 콜백 - Break-Even 손절 조정"""
         state = ctx.strategy_state
         
-        # AlphaEngine 주문만 처리
         if not trade.is_alphaengine_order:
             return
         
@@ -263,13 +208,21 @@ class AtrRiskManagedStrategy(Strategy):
         state: dict[str, Any],
     ) -> None:
         """SMA 크로스 진입 신호 체크"""
-        fast_sma = calculate_sma(ctx.bars, self.fast_sma_period)
-        slow_sma = calculate_sma(ctx.bars, self.slow_sma_period)
+        ohlcv = ctx.ohlcv
         
-        if fast_sma is None or slow_sma is None:
+        # SMA 계산 (indicator 모듈 사용)
+        fast_sma_series = sma(ohlcv, {"period": self.fast_sma_period})
+        slow_sma_series = sma(ohlcv, {"period": self.slow_sma_period})
+        
+        # 최신 값
+        fast_sma_value = fast_sma_series.iloc[-1]
+        slow_sma_value = slow_sma_series.iloc[-1]
+        
+        # NaN 체크
+        if fast_sma_value != fast_sma_value or slow_sma_value != slow_sma_value:
             return
         
-        fast_above = fast_sma > slow_sma
+        fast_above = fast_sma_value > slow_sma_value
         prev_fast_above = state.get("prev_fast_above")
         state["prev_fast_above"] = fast_above
         
@@ -292,13 +245,19 @@ class AtrRiskManagedStrategy(Strategy):
         state: dict[str, Any],
     ) -> None:
         """반대 신호 체크 - 전체 청산"""
-        fast_sma = calculate_sma(ctx.bars, self.fast_sma_period)
-        slow_sma = calculate_sma(ctx.bars, self.slow_sma_period)
+        ohlcv = ctx.ohlcv
         
-        if fast_sma is None or slow_sma is None:
+        fast_sma_series = sma(ohlcv, {"period": self.fast_sma_period})
+        slow_sma_series = sma(ohlcv, {"period": self.slow_sma_period})
+        
+        fast_sma_value = fast_sma_series.iloc[-1]
+        slow_sma_value = slow_sma_series.iloc[-1]
+        
+        # NaN 체크
+        if fast_sma_value != fast_sma_value or slow_sma_value != slow_sma_value:
             return
         
-        fast_above = fast_sma > slow_sma
+        fast_above = fast_sma_value > slow_sma_value
         position = ctx.position
         
         if not position:
@@ -325,19 +284,24 @@ class AtrRiskManagedStrategy(Strategy):
         if not entry_price:
             return
         
-        # ATR 계산
-        atr = calculate_atr(ctx.bars, self.atr_period)
-        if not atr:
-            logger.warning("Cannot calculate ATR, skipping entry")
+        # ATR 계산 (indicator 모듈 사용)
+        atr_series = atr(ctx.ohlcv, {"period": self.atr_period})
+        atr_value = atr_series.iloc[-1]
+        
+        # NaN 체크
+        if atr_value != atr_value:
+            logger.warning("Cannot calculate ATR (NaN), skipping entry")
             return
+        
+        atr_decimal = Decimal(str(atr_value))
         
         # ConfigStore에서 공통 리스크/리워드 설정 조회
         risk_per_trade = ctx.risk_per_trade
         reward_ratio = ctx.reward_ratio
         partial_tp_ratio = ctx.partial_tp_ratio
         
-        # 손절 거리 및 손절가 계산 (atr_multiplier는 전략 파라미터)
-        stop_distance = atr * self.atr_multiplier
+        # 손절 거리 및 손절가 계산
+        stop_distance = atr_decimal * self.atr_multiplier
         stop_loss_price = entry_price - stop_distance
         
         # 2% 룰로 수량 계산
@@ -372,7 +336,7 @@ class AtrRiskManagedStrategy(Strategy):
         logger.info(
             f"LONG entry: qty={qty}, entry={entry_price}, "
             f"SL={stop_loss_price}, TP={take_profit_price}, "
-            f"partial_qty={partial_qty}, ATR={atr}"
+            f"partial_qty={partial_qty}, ATR={atr_decimal}"
         )
         
         # 1. 진입
@@ -412,19 +376,24 @@ class AtrRiskManagedStrategy(Strategy):
         if not entry_price:
             return
         
-        # ATR 계산
-        atr = calculate_atr(ctx.bars, self.atr_period)
-        if not atr:
-            logger.warning("Cannot calculate ATR, skipping entry")
+        # ATR 계산 (indicator 모듈 사용)
+        atr_series = atr(ctx.ohlcv, {"period": self.atr_period})
+        atr_value = atr_series.iloc[-1]
+        
+        # NaN 체크
+        if atr_value != atr_value:
+            logger.warning("Cannot calculate ATR (NaN), skipping entry")
             return
+        
+        atr_decimal = Decimal(str(atr_value))
         
         # ConfigStore에서 공통 리스크/리워드 설정 조회
         risk_per_trade = ctx.risk_per_trade
         reward_ratio = ctx.reward_ratio
         partial_tp_ratio = ctx.partial_tp_ratio
         
-        # 손절 거리 및 손절가 계산 (Short: 손절은 위로, atr_multiplier는 전략 파라미터)
-        stop_distance = atr * self.atr_multiplier
+        # 손절 거리 및 손절가 계산 (Short: 손절은 위로)
+        stop_distance = atr_decimal * self.atr_multiplier
         stop_loss_price = entry_price + stop_distance
         
         # 2% 룰로 수량 계산
@@ -459,7 +428,7 @@ class AtrRiskManagedStrategy(Strategy):
         logger.info(
             f"SHORT entry: qty={qty}, entry={entry_price}, "
             f"SL={stop_loss_price}, TP={take_profit_price}, "
-            f"partial_qty={partial_qty}, ATR={atr}"
+            f"partial_qty={partial_qty}, ATR={atr_decimal}"
         )
         
         # 1. 진입
@@ -495,39 +464,17 @@ class AtrRiskManagedStrategy(Strategy):
         stop_loss_price: Decimal,
         risk_per_trade: Decimal | None = None,
     ) -> Decimal:
-        """2% 룰 기반 포지션 사이즈 계산
-        
-        공식:
-            risk_amount = account_equity * risk_per_trade
-            stop_distance = |entry_price - stop_loss_price|
-            quantity = risk_amount / stop_distance
-        
-        Args:
-            account_equity: 기준 자산 (50거래마다 재평가)
-            entry_price: 진입가
-            stop_loss_price: 손절가
-            risk_per_trade: 거래당 리스크 비율 (ctx.risk_per_trade)
-            
-        Returns:
-            매매 수량
-        """
-        # 리스크 비율 (ConfigStore 우선)
+        """2% 룰 기반 포지션 사이즈 계산"""
         risk_ratio = risk_per_trade or Decimal("0.02")
-        
-        # 리스크 금액 = 자산 * 리스크 비율
         risk_amount = account_equity * risk_ratio
-        
-        # 손절 거리 (절대값)
         stop_distance = abs(entry_price - stop_loss_price)
         
         if stop_distance == Decimal("0"):
             logger.warning("Stop distance is zero, cannot calculate size")
             return Decimal("0")
         
-        # 수량 = 리스크 금액 / 손절 거리
         raw_qty = risk_amount / stop_distance
         
-        # 소수점 자릿수 적용 (내림)
         qty = raw_qty.quantize(
             Decimal(10) ** -self.qty_precision,
             rounding=ROUND_DOWN,
@@ -579,13 +526,9 @@ class AtrRiskManagedStrategy(Strategy):
         state: dict[str, Any],
     ) -> None:
         """모든 주문 취소 + 포지션 청산 + 상태 정리"""
-        # 모든 오픈 주문 취소
         await emit.cancel_all_orders()
-        
-        # 포지션 청산
         await emit.close_position(reduce_only=True)
         
-        # 거래 카운트 및 상태 정리
         self._increment_trade_count(ctx, state)
         self._clear_trade_state(state)
         
@@ -602,10 +545,8 @@ class AtrRiskManagedStrategy(Strategy):
         ) + 1
         state["total_trade_count"] = state.get("total_trade_count", 0) + 1
         
-        # ConfigStore에서 자산 재평가 주기 조회
         equity_reset_trades = ctx.equity_reset_trades
         
-        # 설정된 거래수마다 자산 재평가
         if state["trade_count_since_reset"] >= equity_reset_trades:
             usdt = ctx.usdt_balance
             new_equity = usdt.total if usdt else state["account_equity"]
@@ -647,4 +588,4 @@ class AtrRiskManagedStrategy(Strategy):
     ) -> bool:
         """에러 처리"""
         logger.error(f"{self.name} error: {error}")
-        return True  # 에러 무시하고 계속 실행
+        return True

@@ -9,6 +9,8 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
+import pandas as pd
+
 from core.types import Scope
 from strategies.base import (
     StrategyTickContext,
@@ -58,8 +60,16 @@ class ContextBuilder:
         position = await self._get_position(projector)
         balances = await self._get_balances(projector)
         open_orders = await self._get_open_orders(projector)
+        ohlcv = await self._get_ohlcv(market_data_provider)
         bars = await self._get_bars(market_data_provider)
-        current_price = bars[-1].close if bars else None
+        
+        # 현재가: OHLCV DataFrame에서 가져오거나 bars에서 가져옴
+        if len(ohlcv) > 0:
+            current_price = Decimal(str(ohlcv["close"].iloc[-1]))
+        elif bars:
+            current_price = bars[-1].close
+        else:
+            current_price = None
         
         return StrategyTickContext(
             scope=self.scope,
@@ -67,6 +77,7 @@ class ContextBuilder:
             position=position,
             balances=balances,
             open_orders=open_orders,
+            ohlcv=ohlcv,
             bars=bars,
             current_price=current_price,
             strategy_state=strategy_state or {},
@@ -172,6 +183,27 @@ class ContextBuilder:
         except Exception as e:
             logger.warning(f"Failed to get open orders: {e}")
             return []
+    
+    async def _get_ohlcv(self, market_data_provider: Any) -> pd.DataFrame:
+        """OHLCV DataFrame 조회
+        
+        Returns:
+            DataFrame with DatetimeIndex 'time' and columns: open, high, low, close, volume
+        """
+        if not market_data_provider:
+            return pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
+        
+        try:
+            ohlcv = await market_data_provider.get_ohlcv(
+                symbol=self.scope.symbol,
+                timeframe="5m",
+                limit=100,
+            )
+            return ohlcv
+            
+        except Exception as e:
+            logger.warning(f"Failed to get OHLCV: {e}")
+            return pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
     
     async def _get_bars(self, market_data_provider: Any) -> list[Bar]:
         """캔들 데이터 조회"""

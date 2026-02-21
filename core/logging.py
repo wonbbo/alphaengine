@@ -3,7 +3,7 @@
 
 Bot과 Web 모두에서 사용하는 공통 로깅 설정.
 - 콘솔: INFO 레벨
-- 파일: DEBUG 레벨 (RotatingFileHandler)
+- 파일: INFO 레벨 (TimedRotatingFileHandler, daily)
 
 사용법:
     from core.logging import setup_logging
@@ -13,7 +13,7 @@ Bot과 Web 모두에서 사용하는 공통 로깅 설정.
 
 import logging
 import sys
-from logging.handlers import RotatingFileHandler
+from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 
 from core.constants import Paths
@@ -22,23 +22,33 @@ from core.constants import Paths
 # 로그 설정 상수
 LOG_FORMAT = "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s"
 LOG_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
-LOG_FILE_MAX_BYTES = 10 * 1024 * 1024  # 10MB
-LOG_FILE_BACKUP_COUNT = 5  # 최대 5개 파일 유지 (총 50MB)
+LOG_FILE_BACKUP_COUNT = 7  # 최대 7일치 파일 유지
+
+# 불필요한 로그를 생성하는 로거 목록 (레벨 조정 대상)
+NOISY_LOGGERS = [
+    "aiosqlite",      # DB 쿼리마다 executing/completed 로그 (매우 많음)
+    "httpcore",       # HTTP 연결 상세 로그
+    "httpx",          # HTTP 요청 상세 로그
+    "websockets",     # WebSocket 프레임 로그
+    "asyncio",        # 비동기 이벤트 루프 로그
+    "urllib3",        # HTTP 라이브러리 로그
+]
 
 
 def setup_logging(
     process_name: str,
     console_level: int = logging.INFO,
-    file_level: int = logging.DEBUG,
+    file_level: int = logging.INFO,
 ) -> logging.Logger:
     """로깅 설정 초기화
     
     프로세스 타입에 따라 적절한 로그 디렉토리에 파일 로그 저장.
+    Daily 롤링으로 매일 자정에 새 파일 생성.
     
     Args:
         process_name: 프로세스 이름 ("bot" 또는 "web")
         console_level: 콘솔 로그 레벨 (기본: INFO)
-        file_level: 파일 로그 레벨 (기본: DEBUG)
+        file_level: 파일 로그 레벨 (기본: INFO)
         
     Returns:
         설정된 루트 Logger
@@ -82,21 +92,28 @@ def setup_logging(
     console_handler.setFormatter(formatter)
     root_logger.addHandler(console_handler)
     
-    # 2. 파일 핸들러 (RotatingFileHandler)
-    file_handler = RotatingFileHandler(
+    # 2. 파일 핸들러 (TimedRotatingFileHandler - daily)
+    file_handler = TimedRotatingFileHandler(
         filename=log_file,
-        maxBytes=LOG_FILE_MAX_BYTES,
+        when="midnight",          # 매일 자정에 롤링
+        interval=1,               # 1일 간격
         backupCount=LOG_FILE_BACKUP_COUNT,
         encoding="utf-8",
     )
+    file_handler.suffix = "%Y-%m-%d"  # 백업 파일 형식: bot.log.2026-02-21
     file_handler.setLevel(file_level)
     file_handler.setFormatter(formatter)
     root_logger.addHandler(file_handler)
     
+    # 3. 불필요한 로거 레벨 조정 (로그 볼륨 감소)
+    for logger_name in NOISY_LOGGERS:
+        logging.getLogger(logger_name).setLevel(logging.WARNING)
+    
     # 설정 완료 로그
     root_logger.info(f"로깅 초기화 완료: {process_name}")
     root_logger.info(f"  - 콘솔: {logging.getLevelName(console_level)}")
-    root_logger.info(f"  - 파일: {log_file} ({logging.getLevelName(file_level)})")
+    root_logger.info(f"  - 파일: {log_file} ({logging.getLevelName(file_level)}, daily rotation)")
+    root_logger.info(f"  - 보관: {LOG_FILE_BACKUP_COUNT}일")
     
     return root_logger
 

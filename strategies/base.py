@@ -12,10 +12,12 @@ Strategy Interface
 """
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
 from typing import Any, Protocol
+
+import pandas as pd
 
 from core.types import Scope
 
@@ -256,13 +258,31 @@ class MarketDataProvider(Protocol):
     전략에서 multi-timeframe 데이터를 조회하기 위한 인터페이스.
     """
     
+    async def get_ohlcv(
+        self,
+        symbol: str,
+        timeframe: str | None = None,
+        limit: int | None = None,
+    ) -> pd.DataFrame:
+        """OHLCV DataFrame 조회
+        
+        Args:
+            symbol: 거래 심볼 (예: XRPUSDT)
+            timeframe: 시간 간격 (1m, 5m, 15m, 1h, 4h, 1d 등)
+            limit: 조회 개수
+            
+        Returns:
+            DataFrame with DatetimeIndex 'time' and columns: open, high, low, close, volume
+        """
+        ...
+    
     async def get_bars(
         self,
         symbol: str,
         timeframe: str | None = None,
         limit: int | None = None,
     ) -> list[dict[str, Any]]:
-        """캔들스틱(Bar) 데이터 조회
+        """캔들스틱(Bar) 데이터 조회 (레거시, get_ohlcv 권장)
         
         Args:
             symbol: 거래 심볼 (예: XRPUSDT)
@@ -279,6 +299,11 @@ class MarketDataProvider(Protocol):
         ...
 
 
+def _empty_ohlcv() -> pd.DataFrame:
+    """빈 OHLCV DataFrame 생성"""
+    return pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
+
+
 @dataclass
 class StrategyTickContext:
     """전략 실행 컨텍스트
@@ -292,7 +317,8 @@ class StrategyTickContext:
         position: 현재 포지션 (없으면 None)
         balances: 자산별 잔고 딕셔너리
         open_orders: 오픈 주문 목록
-        bars: 최근 캔들스틱 목록 - 기본 timeframe (최신이 마지막)
+        ohlcv: OHLCV DataFrame (index=DatetimeIndex 'time', columns=open,high,low,close,volume)
+        bars: 최근 캔들스틱 목록 - 레거시 호환 (최신이 마지막)
         current_price: 현재 가격 (마지막 종가)
         strategy_state: 전략별 상태 저장소 (on_tick 간 유지)
         engine_mode: 엔진 모드 (RUNNING, PAUSED, SAFE)
@@ -304,6 +330,7 @@ class StrategyTickContext:
     position: Position | None
     balances: dict[str, Balance]
     open_orders: list[OpenOrder]
+    ohlcv: pd.DataFrame
     bars: list[Bar]
     current_price: Decimal | None
     strategy_state: dict[str, Any]
@@ -385,12 +412,50 @@ class StrategyTickContext:
             return int(self.risk_config.get("equity_reset_trades", 50))
         return 50
     
+    async def get_ohlcv(
+        self,
+        timeframe: str,
+        limit: int = 100,
+    ) -> pd.DataFrame:
+        """다른 timeframe의 OHLCV 데이터 조회 (Multi-Timeframe 지원)
+        
+        Args:
+            timeframe: 시간 간격 (1m, 3m, 5m, 15m, 30m, 1h, 2h, 4h, 6h, 8h, 12h, 1d, 3d, 1w, 1M)
+            limit: 조회 개수 (기본 100)
+            
+        Returns:
+            OHLCV DataFrame (index=DatetimeIndex 'time', columns=open,high,low,close,volume)
+            
+        사용 예시:
+        ```python
+        # 15분봉 조회
+        ohlcv_15m = await ctx.get_ohlcv("15m", limit=50)
+        
+        # 1시간봉 조회
+        ohlcv_1h = await ctx.get_ohlcv("1h", limit=24)
+        
+        # 최신 종가
+        close_price = ohlcv_15m["close"].iloc[-1]
+        ```
+        """
+        if not self.market_data or not self.symbol:
+            return _empty_ohlcv()
+        
+        try:
+            return await self.market_data.get_ohlcv(
+                symbol=self.symbol,
+                timeframe=timeframe,
+                limit=limit,
+            )
+        except Exception:
+            return _empty_ohlcv()
+    
     async def get_bars(
         self,
         timeframe: str,
         limit: int = 100,
     ) -> list[Bar]:
-        """다른 timeframe의 캔들 데이터 조회 (Multi-Timeframe 지원)
+        """다른 timeframe의 캔들 데이터 조회 (레거시 호환, get_ohlcv 권장)
         
         Args:
             timeframe: 시간 간격 (1m, 3m, 5m, 15m, 30m, 1h, 2h, 4h, 6h, 8h, 12h, 1d, 3d, 1w, 1M)
@@ -398,15 +463,6 @@ class StrategyTickContext:
             
         Returns:
             Bar 리스트 (오래된 것부터 최신 순)
-            
-        사용 예시:
-        ```python
-        # 15분봉 조회
-        bars_15m = await ctx.get_bars("15m", limit=50)
-        
-        # 1시간봉 조회
-        bars_1h = await ctx.get_bars("1h", limit=24)
-        ```
         """
         if not self.market_data or not self.symbol:
             return []

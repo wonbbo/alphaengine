@@ -5,16 +5,18 @@
 ## 목차
 
 1. [전략 구조 개요](#전략-구조-개요)
-2. [리스크 기반 수량 계산](#리스크-기반-수량-계산)
-3. [신규 전략 생성](#신규-전략-생성)
-4. [전략 등록 및 적용](#전략-등록-및-적용)
-5. [전략 파라미터](#전략-파라미터)
-6. [전략 컨텍스트](#전략-컨텍스트)
-7. [이벤트 기반 콜백](#이벤트-기반-콜백)
-8. [Multi-Timeframe 전략](#multi-timeframe-전략)
-9. [Command 발행](#command-발행)
-10. [테스트](#테스트)
-11. [체크리스트](#체크리스트)
+2. [OHLCV DataFrame](#ohlcv-dataframe)
+3. [Indicator 시스템](#indicator-시스템)
+4. [리스크 기반 수량 계산](#리스크-기반-수량-계산)
+5. [신규 전략 생성](#신규-전략-생성)
+6. [전략 등록 및 적용](#전략-등록-및-적용)
+7. [전략 파라미터](#전략-파라미터)
+8. [전략 컨텍스트](#전략-컨텍스트)
+9. [이벤트 기반 콜백](#이벤트-기반-콜백)
+10. [Multi-Timeframe 전략](#multi-timeframe-전략)
+11. [Command 발행](#command-발행)
+12. [테스트](#테스트)
+13. [체크리스트](#체크리스트)
 
 ---
 
@@ -26,6 +28,11 @@ AlphaEngine의 전략은 `Strategy` 추상 클래스를 상속받아 구현합�
 strategies/
 ├── base.py                    # Strategy 추상 클래스, 타입 정의
 ├── __init__.py
+├── indicators/                # 재사용 가능한 기술적 지표
+│   ├── __init__.py           # 공개 API
+│   ├── trend.py              # sma, ema, macd
+│   ├── volatility.py         # atr, bollinger_bands
+│   └── momentum.py           # rsi, stochastic
 └── examples/
     ├── sma_cross.py           # SMA 크로스 (교육용 단순 예제)
     ├── atr_risk_strategy.py   # ATR 기반 리스크 관리 전략 (권장)
@@ -35,9 +42,10 @@ strategies/
 ### 핵심 원칙
 
 1. **전략은 거래소 API를 직접 호출하지 않음** - `CommandEmitter`를 통해 Command 발행
-2. **상태는 `strategy_state`에 저장** - 틱 간 유지되는 상태
-3. **거래 조건은 `ctx.can_trade` 확인** - 엔진 모드 검증
-4. **매매 수량은 전략 내부에서 동적 계산** - 리스크 기반
+2. **OHLCV는 pandas DataFrame으로 제공** - 효율적인 벡터 연산 지원
+3. **Indicator는 모듈에서 import** - 재사용 가능하고 테스트된 함수 사용
+4. **상태는 `strategy_state`에 저장** - 틱 간 유지되는 상태
+5. **매매 수량은 전략 내부에서 동적 계산** - 리스크 기반
 
 ### RiskGuard와 전략의 관계
 
@@ -50,6 +58,168 @@ strategies/
 
 > RiskGuard는 "안전망"입니다. 전략이 실수로 과도한 주문을 발행해도 RiskGuard가 막아주지만, 
 > 이를 의존해서는 안 됩니다. **전략이 스스로 리스크를 관리해야 합니다.**
+
+---
+
+## OHLCV DataFrame
+
+### 데이터 구조
+
+AlphaEngine에서 시장 데이터는 **pandas DataFrame** 형식으로 제공됩니다.
+
+```python
+#                              open     high      low    close     volume
+# time (DatetimeIndex)                                                       
+# 2026-02-21 09:00:00+00:00  2.3450   2.3520   2.3400   2.3510   1234567.0
+# 2026-02-21 09:05:00+00:00  2.3510   2.3600   2.3480   2.3590   1345678.0
+# ...
+```
+
+### DataFrame 표준
+
+| 속성 | 설명 |
+|------|------|
+| **Index** | `DatetimeIndex` (UTC, timezone-aware), name='time' |
+| **open** | 시가 (float64) |
+| **high** | 고가 (float64) |
+| **low** | 저가 (float64) |
+| **close** | 종가 (float64) |
+| **volume** | 거래량 (float64) |
+
+### 접근 방법
+
+```python
+async def on_tick(self, ctx: StrategyTickContext, emit: CommandEmitter) -> None:
+    ohlcv = ctx.ohlcv  # 기본 5분봉 OHLCV DataFrame
+    
+    # 최신 종가
+    latest_close = ohlcv["close"].iloc[-1]
+    
+    # 최근 10개 캔들의 고가 평균
+    high_avg = ohlcv["high"].tail(10).mean()
+    
+    # 시간 인덱스 활용
+    latest_time = ohlcv.index[-1]
+    
+    # 데이터 길이 확인
+    if len(ohlcv) < 20:
+        return  # 데이터 부족
+```
+
+### 다른 Timeframe 조회
+
+```python
+# Multi-Timeframe 데이터 조회
+ohlcv_15m = await ctx.get_ohlcv("15m", limit=50)
+ohlcv_1h = await ctx.get_ohlcv("1h", limit=24)
+ohlcv_4h = await ctx.get_ohlcv("4h", limit=30)
+```
+
+---
+
+## Indicator 시스템
+
+### 개요
+
+AlphaEngine은 재사용 가능한 **Indicator 모듈**을 제공합니다. 모든 indicator 함수는 통일된 인터페이스를 따릅니다.
+
+```python
+def indicator_name(
+    ohlcv: pd.DataFrame,
+    params: dict[str, Any],
+) -> pd.Series | tuple[pd.Series, ...]
+```
+
+### 사용법
+
+```python
+from strategies.indicators import sma, ema, atr, rsi, macd, bollinger_bands, stochastic
+
+# 단일 리턴 indicator
+sma_20 = sma(ctx.ohlcv, {"period": 20})
+ema_12 = ema(ctx.ohlcv, {"period": 12})
+atr_14 = atr(ctx.ohlcv, {"period": 14})
+rsi_14 = rsi(ctx.ohlcv, {"period": 14})
+
+# 복수 리턴 indicator
+macd_line, signal, histogram = macd(ctx.ohlcv, {})
+upper, middle, lower = bollinger_bands(ctx.ohlcv, {"period": 20})
+percent_k, percent_d = stochastic(ctx.ohlcv, {})
+```
+
+### 사용 가능한 Indicator
+
+#### Trend Indicators (`strategies/indicators/trend.py`)
+
+| 함수 | 파라미터 | 반환 | 설명 |
+|------|----------|------|------|
+| `sma` | `period` (필수), `source` (기본 "close") | `pd.Series` | 단순 이동평균 |
+| `ema` | `period` (필수), `source` (기본 "close") | `pd.Series` | 지수 이동평균 |
+| `macd` | `fast_period` (12), `slow_period` (26), `signal_period` (9) | `tuple[Series, Series, Series]` | MACD 라인, 시그널, 히스토그램 |
+
+#### Volatility Indicators (`strategies/indicators/volatility.py`)
+
+| 함수 | 파라미터 | 반환 | 설명 |
+|------|----------|------|------|
+| `atr` | `period` (기본 14) | `pd.Series` | Average True Range |
+| `bollinger_bands` | `period` (20), `std_dev` (2.0), `source` ("close") | `tuple[Series, Series, Series]` | 상단, 중간, 하단 밴드 |
+
+#### Momentum Indicators (`strategies/indicators/momentum.py`)
+
+| 함수 | 파라미터 | 반환 | 설명 |
+|------|----------|------|------|
+| `rsi` | `period` (기본 14), `source` ("close") | `pd.Series` | RSI (0-100) |
+| `stochastic` | `k_period` (14), `d_period` (3), `smooth_k` (3) | `tuple[Series, Series]` | %K, %D |
+
+### 최신 값 가져오기
+
+```python
+from strategies.indicators import sma, atr
+
+sma_series = sma(ctx.ohlcv, {"period": 20})
+atr_series = atr(ctx.ohlcv, {"period": 14})
+
+# 최신 값 가져오기
+sma_value = sma_series.iloc[-1]
+atr_value = atr_series.iloc[-1]
+
+# NaN 체크 (데이터 부족 시 초기 값들은 NaN)
+if pd.isna(sma_value) or pd.isna(atr_value):
+    return  # 데이터 부족
+```
+
+### 커스텀 Indicator 작성
+
+새로운 indicator를 추가하려면 동일한 인터페이스를 따르세요.
+
+```python
+# strategies/indicators/my_indicator.py
+
+from typing import Any
+import pandas as pd
+
+
+def my_indicator(ohlcv: pd.DataFrame, params: dict[str, Any]) -> pd.Series:
+    """커스텀 Indicator
+    
+    Args:
+        ohlcv: OHLCV DataFrame
+        params: {
+            "period": int (필수) - 기간
+        }
+        
+    Returns:
+        pd.Series: 계산된 값
+    """
+    period = params.get("period")
+    if period is None:
+        raise ValueError("params['period'] is required")
+    
+    # 계산 로직
+    result = ohlcv["close"].rolling(window=int(period)).mean()
+    
+    return result
+```
 
 ---
 
@@ -74,41 +244,19 @@ stop_distance = abs(entry_price - stop_loss_price)  # 예: |100 - 98| = 2 USDT
 quantity = risk_amount / stop_distance  # 예: 200 / 2 = 100개
 ```
 
-이 방식의 장점:
-- 손절 시 항상 총자산의 2%만 손실
-- 변동성에 자동 적응 (ATR 큰 구간 = 적은 수량)
-- 연속 손실에도 파산 확률 최소화
-
-### 50거래 자산 재평가 (Account Equity Reset)
-
-**핵심 원칙**: 2% 룰의 기준 자산은 50거래마다 재평가
-
-| 시점 | 기준 자산 | 리스크 금액 (2%) |
-|------|-----------|-----------------|
-| 시작 | 10,000 USDT | 200 USDT |
-| 25번째 거래 | 10,000 USDT (유지) | 200 USDT |
-| 50번째 거래 후 | 12,000 USDT (재평가) | 240 USDT |
-| 100번째 거래 후 | 9,000 USDT (재평가) | 180 USDT |
-
-이 방식의 장점:
-- 자주 재평가하면 변동 심함 → 50거래로 안정화
-- 수익 시 점진적 복리 효과
-- 손실 시 점진적 리스크 감소 (파산 방지)
-
 ### ATR 기반 손절 라인
 
-**핵심 원칙**: 손절 거리 = ATR × Multiplier (보통 2)
-
 ```python
-atr = calculate_atr(bars, period=14)  # 예: 1.5 USDT
-stop_distance = atr * 2  # 3 USDT
+from strategies.indicators import atr
+
+# ATR 계산 (indicator 모듈 사용)
+atr_series = atr(ctx.ohlcv, {"period": 14})
+atr_value = Decimal(str(atr_series.iloc[-1]))
+
+# 손절 거리 = ATR × multiplier
+stop_distance = atr_value * Decimal("2.0")
 stop_loss_price = entry_price - stop_distance  # Long의 경우
 ```
-
-ATR의 장점:
-- 시장 변동성에 자동 적응
-- 변동성 큰 구간: 넓은 손절 → 휩쏘 방지
-- 변동성 낮은 구간: 좁은 손절 → 빠른 손절
 
 ### 실제 수량 계산 예시
 
@@ -131,8 +279,6 @@ ATR의 장점:
 
 ### ConfigStore 리스크/리워드 설정
 
-리스크/리워드 관련 **공통 설정**은 `config_store` 테이블의 "risk" 키에 저장되며, 전략에서 `ctx` 프로퍼티로 접근합니다.
-
 | 설정 키 | 기본값 | 설명 | 접근 방식 |
 |---------|--------|------|-----------|
 | `risk_per_trade` | "0.02" | 거래당 리스크 비율 (2%) | `ctx.risk_per_trade` |
@@ -140,113 +286,11 @@ ATR의 장점:
 | `partial_tp_ratio` | "0.5" | 부분 익절 비율 (50%) | `ctx.partial_tp_ratio` |
 | `equity_reset_trades` | 50 | 자산 재평가 주기 (거래 수) | `ctx.equity_reset_trades` |
 
-이 값들은 Web UI에서 변경하면 실시간으로 전략에 반영됩니다.
-
-### 전략 파라미터 (손절 방식별)
-
-손절 방식에 따른 파라미터는 전략별로 다르므로 `secrets.yaml`의 `strategy.params`에서 관리합니다.
-
-| 손절 방식 | 파라미터 예시 | 관리 위치 |
-|-----------|---------------|-----------|
-| ATR 기반 | `atr_period`, `atr_multiplier` | 전략 `params` |
-| 퍼센트 기반 | `stop_percent` | 전략 `params` |
-| 지지/저항 기반 | `buffer_ticks` | 전략 `params` |
-
-### 전략 상태 저장 (Bot 재시작 유지)
-
-50거래마다 재평가되는 `account_equity`와 거래 카운트는 DB에 저장되어 Bot 재시작 시에도 유지됩니다.
-
-| 저장 항목 | 설명 |
-|-----------|------|
-| `account_equity` | 현재 기준 자산 |
-| `trade_count_since_reset` | 마지막 재평가 이후 거래 수 |
-| `total_trade_count` | 총 거래 수 |
-
-**저장 시점**:
-- 거래 종료 시 (손절/익절 체결)
-- Bot 종료 시
-
-**복원 시점**:
-- Bot 시작 시 (`on_start` 호출 전)
-
-### 구현 코드
-
-```python
-async def _enter_long(self, ctx: StrategyTickContext, emit: CommandEmitter, state: dict):
-    """Long 진입 - ConfigStore + 전략 파라미터 혼용"""
-    entry_price = ctx.current_price
-    atr = calculate_atr(ctx.bars, self.atr_period)
-    
-    # ConfigStore에서 공통 리스크/리워드 설정 조회 (실시간 반영)
-    risk_per_trade = ctx.risk_per_trade     # 2% 룰
-    reward_ratio = ctx.reward_ratio          # R:R 비율
-    partial_tp_ratio = ctx.partial_tp_ratio  # 부분 익절 비율
-    
-    # 손절 거리 계산 (atr_multiplier는 전략 파라미터)
-    stop_distance = atr * self.atr_multiplier
-    stop_loss_price = entry_price - stop_distance
-    
-    # 2% 룰로 수량 계산
-    qty = self._calculate_position_size(
-        account_equity=state["account_equity"],
-        entry_price=entry_price,
-        stop_loss_price=stop_loss_price,
-        risk_per_trade=risk_per_trade,  # ConfigStore 값 전달
-    )
-    
-    # 익절가 계산
-    take_profit_price = entry_price + (stop_distance * reward_ratio)
-    partial_qty = qty * partial_tp_ratio
-    
-    # ... 주문 발행
-
-def _calculate_position_size(
-    self,
-    account_equity: Decimal,
-    entry_price: Decimal,
-    stop_loss_price: Decimal,
-    risk_per_trade: Decimal | None = None,  # ConfigStore에서 전달
-) -> Decimal:
-    """2% 룰 기반 포지션 사이즈 계산
-    
-    Args:
-        account_equity: 기준 자산 (50거래마다 재평가)
-        entry_price: 진입가
-        stop_loss_price: 손절가
-        risk_per_trade: 거래당 리스크 비율 (ctx.risk_per_trade)
-        
-    Returns:
-        매매 수량
-    """
-    # 리스크 비율 (ConfigStore 우선)
-    risk_ratio = risk_per_trade or Decimal("0.02")
-    
-    # 리스크 금액 = 자산 × 리스크 비율
-    risk_amount = account_equity * risk_ratio
-    
-    # 손절 거리 (절대값)
-    stop_distance = abs(entry_price - stop_loss_price)
-    
-    if stop_distance == Decimal("0"):
-        return Decimal("0")
-    
-    # 수량 = 리스크 금액 / 손절 거리
-    raw_qty = risk_amount / stop_distance
-    
-    # 소수점 자릿수 적용 (내림)
-    qty = raw_qty.quantize(
-        Decimal(10) ** -self.qty_precision,
-        rounding=ROUND_DOWN,
-    )
-    
-    return qty
-```
-
 ---
 
 ## 신규 전략 생성
 
-### 전략 템플릿 (리스크 기반)
+### 전략 템플릿 (Indicator + DataFrame 기반)
 
 ```python
 # strategies/my_strategy.py
@@ -254,7 +298,7 @@ def _calculate_position_size(
 """
 My Custom Strategy
 
-리스크 기반 수량 계산을 포함한 전략 템플릿.
+OHLCV DataFrame과 indicator 모듈을 사용하는 전략 템플릿.
 """
 
 import logging
@@ -265,43 +309,22 @@ from strategies.base import (
     Strategy,
     StrategyTickContext,
     CommandEmitter,
-    Bar,
     TradeEvent,
     OrderEvent,
 )
+from strategies.indicators import sma, atr
 
 logger = logging.getLogger(__name__)
-
-
-def calculate_atr(bars: list[Bar], period: int) -> Decimal | None:
-    """Average True Range 계산"""
-    if len(bars) < period + 1:
-        return None
-    
-    true_ranges: list[Decimal] = []
-    
-    for i in range(-period, 0):
-        current = bars[i]
-        previous = bars[i - 1]
-        
-        high_low = current.high - current.low
-        high_prev_close = abs(current.high - previous.close)
-        low_prev_close = abs(current.low - previous.close)
-        
-        true_range = max(high_low, high_prev_close, low_prev_close)
-        true_ranges.append(true_range)
-    
-    return sum(true_ranges) / Decimal(period)
 
 
 class MyStrategy(Strategy):
     """리스크 기반 전략 템플릿
     
     핵심 기능:
-    1. ATR 기반 손절 라인 계산
-    2. 2% 룰로 수량 동적 계산
-    3. 50거래마다 자산 재평가
-    4. 부분 익절 후 Break-Even 손절
+    1. OHLCV DataFrame 기반 데이터 처리
+    2. Indicator 모듈 사용
+    3. ATR 기반 손절 라인 계산
+    4. 2% 룰로 수량 동적 계산
     """
     
     @property
@@ -314,34 +337,30 @@ class MyStrategy(Strategy):
     
     @property
     def description(self) -> str:
-        return "Risk-managed strategy template"
+        return "Risk-managed strategy with indicator module"
     
     @property
     def default_params(self) -> dict[str, Any]:
-        # 주의: quantity는 파라미터에 없음 (전략 내부에서 계산)
         return {
-            # 리스크 관리
-            "risk_per_trade": "0.02",       # 2% 룰
-            "atr_period": 14,                # ATR 기간
-            "atr_multiplier": "2.0",         # 손절 = 2*ATR
-            "reward_ratio": "1.5",           # R:R 1:1.5
-            "partial_tp_ratio": "0.5",       # 50% 부분 익절
-            "equity_reset_trades": 50,       # 50거래마다 자산 재평가
+            # SMA 크로스 파라미터
+            "fast_sma_period": 5,
+            "slow_sma_period": 20,
             
-            # 거래소 제약 (심볼별로 다름)
+            # ATR 손절 파라미터
+            "atr_period": 14,
+            "atr_multiplier": "2.0",
+            
+            # 거래소 제약
             "min_qty": "1",
             "qty_precision": 0,
         }
     
     async def on_init(self, params: dict[str, Any]) -> None:
         """파라미터 초기화"""
-        self.risk_per_trade = Decimal(str(params.get("risk_per_trade", "0.02")))
+        self.fast_sma_period = int(params.get("fast_sma_period", 5))
+        self.slow_sma_period = int(params.get("slow_sma_period", 20))
         self.atr_period = int(params.get("atr_period", 14))
         self.atr_multiplier = Decimal(str(params.get("atr_multiplier", "2.0")))
-        self.reward_ratio = Decimal(str(params.get("reward_ratio", "1.5")))
-        self.partial_tp_ratio = Decimal(str(params.get("partial_tp_ratio", "0.5")))
-        self.equity_reset_trades = int(params.get("equity_reset_trades", 50))
-        
         self.min_qty = Decimal(str(params.get("min_qty", "1")))
         self.qty_precision = int(params.get("qty_precision", 0))
         
@@ -350,22 +369,14 @@ class MyStrategy(Strategy):
     async def on_start(self, ctx: StrategyTickContext) -> None:
         """전략 시작 - 상태 초기화"""
         state = ctx.strategy_state
-        
-        # 50거래 재평가용 기준 자산 설정
         usdt = ctx.usdt_balance
-        initial_equity = usdt.total if usdt else Decimal("0")
         
-        state["account_equity"] = initial_equity
+        state["account_equity"] = usdt.total if usdt else Decimal("0")
         state["trade_count_since_reset"] = 0
         state["total_trade_count"] = 0
+        state["prev_fast_above"] = None
         
-        # 포지션 상태
-        state["in_trade"] = False
-        state["entry_price"] = None
-        state["stop_loss_price"] = None
-        state["partial_tp_done"] = False
-        
-        logger.info(f"{self.name} started, equity={initial_equity}")
+        logger.info(f"{self.name} started on {ctx.symbol}")
     
     async def on_tick(
         self,
@@ -376,114 +387,83 @@ class MyStrategy(Strategy):
         if not ctx.can_trade:
             return
         
+        ohlcv = ctx.ohlcv
         state = ctx.strategy_state
         
-        # 포지션 없음 → 진입 판단
-        if not ctx.has_position:
-            if state.get("in_trade"):
-                self._clear_trade_state(state)
-            
-            if self._should_enter(ctx):
-                await self._enter(ctx, emit, state)
-        
-        # 포지션 있음 → 청산 판단
-        else:
-            if self._should_exit(ctx):
-                await self._close_all(ctx, emit, state)
-    
-    async def on_trade(
-        self,
-        trade: TradeEvent,
-        ctx: StrategyTickContext,
-        emit: CommandEmitter,
-    ) -> None:
-        """체결 이벤트 - Break-Even 손절 조정"""
-        state = ctx.strategy_state
-        
-        if not trade.is_alphaengine_order:
+        # 데이터 충분성 검증
+        required_rows = max(self.slow_sma_period, self.atr_period + 1)
+        if len(ohlcv) < required_rows:
             return
         
-        # 부분 익절 → 손절을 진입가로 이동
-        if trade.is_reduce and trade.is_profitable:
-            if not state.get("partial_tp_done"):
-                state["partial_tp_done"] = True
-                await self._move_stop_to_breakeven(ctx, emit, state)
-    
-    async def on_order_update(
-        self,
-        order: OrderEvent,
-        ctx: StrategyTickContext,
-        emit: CommandEmitter,
-    ) -> None:
-        """주문 상태 변경 - 손절 체결 시 정리"""
-        state = ctx.strategy_state
+        # SMA 계산 (indicator 모듈 사용)
+        fast_sma_series = sma(ohlcv, {"period": self.fast_sma_period})
+        slow_sma_series = sma(ohlcv, {"period": self.slow_sma_period})
         
-        if order.is_filled and order.is_stop_loss:
-            self._increment_trade_count(ctx, state)
-            self._clear_trade_state(state)
+        fast_sma_value = fast_sma_series.iloc[-1]
+        slow_sma_value = slow_sma_series.iloc[-1]
+        
+        # NaN 체크
+        if fast_sma_value != fast_sma_value or slow_sma_value != slow_sma_value:
+            return
+        
+        fast_above = fast_sma_value > slow_sma_value
+        prev_fast_above = state.get("prev_fast_above")
+        state["prev_fast_above"] = fast_above
+        
+        if prev_fast_above is None:
+            return
+        
+        # 포지션 없을 때만 진입
+        if not ctx.has_position:
+            if fast_above and not prev_fast_above:
+                # 골든 크로스 → Long 진입
+                await self._enter_long(ctx, emit, state)
+            elif not fast_above and prev_fast_above:
+                # 데드 크로스 → Short 진입
+                await self._enter_short(ctx, emit, state)
     
-    def _should_enter(self, ctx: StrategyTickContext) -> bool:
-        """진입 조건 (구현 필요)"""
-        # TODO: 진입 로직 구현
-        return False
-    
-    def _should_exit(self, ctx: StrategyTickContext) -> bool:
-        """청산 조건 (구현 필요)"""
-        # TODO: 청산 로직 구현
-        return False
-    
-    async def _enter(
+    async def _enter_long(
         self,
         ctx: StrategyTickContext,
         emit: CommandEmitter,
         state: dict[str, Any],
     ) -> None:
-        """진입 (Long 예시)"""
+        """Long 진입"""
         entry_price = ctx.current_price
         if not entry_price:
             return
         
-        # ATR 계산
-        atr = calculate_atr(ctx.bars, self.atr_period)
-        if not atr:
+        # ATR 계산 (indicator 모듈 사용)
+        atr_series = atr(ctx.ohlcv, {"period": self.atr_period})
+        atr_value = atr_series.iloc[-1]
+        
+        if atr_value != atr_value:  # NaN 체크
             return
         
-        # 손절/익절가 계산
-        stop_distance = atr * self.atr_multiplier
+        atr_decimal = Decimal(str(atr_value))
+        
+        # 손절 계산
+        stop_distance = atr_decimal * self.atr_multiplier
         stop_loss_price = entry_price - stop_distance
-        take_profit_price = entry_price + (stop_distance * self.reward_ratio)
         
         # 2% 룰로 수량 계산
         qty = self._calculate_position_size(
             account_equity=state["account_equity"],
             entry_price=entry_price,
             stop_loss_price=stop_loss_price,
+            risk_per_trade=ctx.risk_per_trade,
         )
         
         if qty < self.min_qty:
-            logger.warning(f"qty {qty} < min_qty {self.min_qty}")
             return
         
-        partial_qty = (qty * self.partial_tp_ratio).quantize(
-            Decimal(10) ** -self.qty_precision,
-            rounding=ROUND_DOWN,
-        )
-        
-        # 상태 저장
-        state["in_trade"] = True
-        state["entry_price"] = entry_price
-        state["stop_loss_price"] = stop_loss_price
-        state["initial_qty"] = qty
-        state["partial_tp_done"] = False
-        
-        # 1. 진입
+        # 주문 발행
         await emit.place_order(
             side="BUY",
             order_type="MARKET",
             quantity=str(qty),
         )
         
-        # 2. 손절
         await emit.place_order(
             side="SELL",
             order_type="STOP_MARKET",
@@ -491,25 +471,27 @@ class MyStrategy(Strategy):
             stop_price=str(stop_loss_price),
             reduce_only=True,
         )
-        
-        # 3. 부분 익절
-        if partial_qty >= self.min_qty:
-            await emit.place_order(
-                side="SELL",
-                order_type="LIMIT",
-                quantity=str(partial_qty),
-                price=str(take_profit_price),
-                reduce_only=True,
-            )
+    
+    async def _enter_short(
+        self,
+        ctx: StrategyTickContext,
+        emit: CommandEmitter,
+        state: dict[str, Any],
+    ) -> None:
+        """Short 진입 (Long과 반대)"""
+        # ... 구현
+        pass
     
     def _calculate_position_size(
         self,
         account_equity: Decimal,
         entry_price: Decimal,
         stop_loss_price: Decimal,
+        risk_per_trade: Decimal | None = None,
     ) -> Decimal:
         """2% 룰 기반 포지션 사이즈 계산"""
-        risk_amount = account_equity * self.risk_per_trade
+        risk_ratio = risk_per_trade or Decimal("0.02")
+        risk_amount = account_equity * risk_ratio
         stop_distance = abs(entry_price - stop_loss_price)
         
         if stop_distance == Decimal("0"):
@@ -521,72 +503,6 @@ class MyStrategy(Strategy):
             Decimal(10) ** -self.qty_precision,
             rounding=ROUND_DOWN,
         )
-    
-    async def _move_stop_to_breakeven(
-        self,
-        ctx: StrategyTickContext,
-        emit: CommandEmitter,
-        state: dict[str, Any],
-    ) -> None:
-        """손절을 진입가로 이동"""
-        entry_price = state.get("entry_price")
-        if not entry_price or not ctx.position:
-            return
-        
-        # 기존 손절 취소
-        for order in ctx.open_orders:
-            if order.order_type in ("STOP", "STOP_MARKET"):
-                await emit.cancel_order(exchange_order_id=order.exchange_order_id)
-        
-        # 새 손절 (진입가)
-        await emit.place_order(
-            side="SELL",
-            order_type="STOP_MARKET",
-            quantity=str(ctx.position.qty),
-            stop_price=str(entry_price),
-            reduce_only=True,
-        )
-        
-        logger.info(f"SL moved to break-even: {entry_price}")
-    
-    async def _close_all(
-        self,
-        ctx: StrategyTickContext,
-        emit: CommandEmitter,
-        state: dict[str, Any],
-    ) -> None:
-        """전체 청산"""
-        await emit.cancel_all_orders()
-        await emit.close_position(reduce_only=True)
-        self._increment_trade_count(ctx, state)
-        self._clear_trade_state(state)
-    
-    def _increment_trade_count(
-        self,
-        ctx: StrategyTickContext,
-        state: dict[str, Any],
-    ) -> None:
-        """거래 카운트 및 50거래 재평가"""
-        state["trade_count_since_reset"] = state.get("trade_count_since_reset", 0) + 1
-        state["total_trade_count"] = state.get("total_trade_count", 0) + 1
-        
-        if state["trade_count_since_reset"] >= self.equity_reset_trades:
-            usdt = ctx.usdt_balance
-            new_equity = usdt.total if usdt else state["account_equity"]
-            old_equity = state["account_equity"]
-            
-            state["account_equity"] = new_equity
-            state["trade_count_since_reset"] = 0
-            
-            logger.info(f"Equity reset: {old_equity} → {new_equity}")
-    
-    def _clear_trade_state(self, state: dict[str, Any]) -> None:
-        """거래 상태 초기화"""
-        state["in_trade"] = False
-        state["entry_price"] = None
-        state["stop_loss_price"] = None
-        state["initial_qty"] = None
-        state["partial_tp_done"] = False
 ```
 
 ---
@@ -601,13 +517,10 @@ strategy:
   class: "AtrRiskManagedStrategy"
   auto_start: true
   params:
-    # 리스크 관리 (선택)
-    risk_per_trade: "0.02"
     atr_period: 14
     atr_multiplier: "2.0"
-    equity_reset_trades: 50
-    
-    # 거래소 제약 (심볼별로 확인)
+    fast_sma_period: 5
+    slow_sma_period: 20
     min_qty: "1"
     qty_precision: 0
 ```
@@ -630,21 +543,17 @@ strategy:
 @property
 def default_params(self) -> dict[str, Any]:
     return {
-        # === 리스크 관리 ===
-        "risk_per_trade": "0.02",       # 거래당 리스크 비율
-        "atr_period": 14,                # ATR 기간
-        "atr_multiplier": "2.0",         # 손절 = ATR × multiplier
-        "reward_ratio": "1.5",           # 익절 = 손절거리 × ratio
-        "partial_tp_ratio": "0.5",       # 부분 익절 비율
-        "equity_reset_trades": 50,       # 자산 재평가 주기
+        # === 전략 고유 파라미터 ===
+        "fast_sma_period": 5,
+        "slow_sma_period": 20,
         
-        # === 전략 고유 ===
-        "signal_period": 20,             # 신호 판단 기간
-        # ... 전략별 파라미터 ...
+        # === ATR 손절 파라미터 ===
+        "atr_period": 14,
+        "atr_multiplier": "2.0",
         
         # === 거래소 제약 ===
-        "min_qty": "1",                  # 최소 주문 수량
-        "qty_precision": 0,              # 수량 소수점
+        "min_qty": "1",
+        "qty_precision": 0,
     }
 ```
 
@@ -662,7 +571,8 @@ def default_params(self) -> dict[str, Any]:
 |------|------|------|
 | `ctx.symbol` | `str` | 거래 심볼 |
 | `ctx.now` | `datetime` | 현재 시간 (UTC) |
-| `ctx.bars` | `list[Bar]` | 캔들 데이터 |
+| `ctx.ohlcv` | `pd.DataFrame` | **OHLCV DataFrame** |
+| `ctx.bars` | `list[Bar]` | 캔들 데이터 (레거시) |
 | `ctx.current_price` | `Decimal \| None` | 현재가 |
 | `ctx.position` | `Position \| None` | 현재 포지션 |
 | `ctx.has_position` | `bool` | 포지션 보유 여부 |
@@ -671,15 +581,34 @@ def default_params(self) -> dict[str, Any]:
 | `ctx.open_orders` | `list[OpenOrder]` | 미체결 주문 |
 | `ctx.strategy_state` | `dict` | 틱 간 유지되는 상태 |
 | `ctx.can_trade` | `bool` | 거래 가능 여부 |
-| `ctx.market_data` | `MarketDataProvider` | MTF용 |
+| `ctx.risk_per_trade` | `Decimal` | 거래당 리스크 비율 |
+| `ctx.reward_ratio` | `Decimal` | R:R 비율 |
 
-### 잔고 조회 (자산 재평가용)
+### OHLCV vs bars
+
+| 속성 | 타입 | 권장 |
+|------|------|------|
+| `ctx.ohlcv` | `pd.DataFrame` | **권장** - 벡터 연산, indicator 모듈과 호환 |
+| `ctx.bars` | `list[Bar]` | 레거시 - 하위 호환용 |
 
 ```python
-usdt = ctx.usdt_balance
-if usdt:
-    total_equity = usdt.total  # free + locked
-    free_equity = usdt.free    # 사용 가능
+# 권장: DataFrame 사용
+ohlcv = ctx.ohlcv
+sma_20 = sma(ohlcv, {"period": 20})
+
+# 레거시: list[Bar] (하위 호환)
+bars = ctx.bars  # 사용 자제
+```
+
+### Multi-Timeframe 조회
+
+```python
+# DataFrame으로 조회 (권장)
+ohlcv_15m = await ctx.get_ohlcv("15m", limit=50)
+ohlcv_1h = await ctx.get_ohlcv("1h", limit=24)
+
+# 레거시 (하위 호환)
+bars_15m = await ctx.get_bars("15m", limit=50)
 ```
 
 ---
@@ -720,34 +649,6 @@ class TradeEvent:
     is_alphaengine_order: bool  # AlphaEngine 주문 여부
 ```
 
-### OrderEvent
-
-주문 상태 변경 시 `on_order_update()` 콜백으로 전달:
-
-```python
-@dataclass(frozen=True)
-class OrderEvent:
-    order_id: str
-    client_order_id: str | None
-    symbol: str
-    status: str            # NEW, FILLED, CANCELED, REJECTED, EXPIRED
-    order_type: str
-    side: str
-    price: Decimal | None
-    stop_price: Decimal | None
-    original_qty: Decimal
-    executed_qty: Decimal
-    avg_price: Decimal
-    reduce_only: bool
-    close_position: bool
-    timestamp: datetime
-    
-    # 주요 속성
-    is_filled: bool        # 완전 체결
-    is_stop_loss: bool     # 손절 주문
-    is_take_profit: bool   # 익절 주문
-```
-
 ### 활용 예시
 
 ```python
@@ -764,31 +665,31 @@ async def on_trade(
         if not state.get("partial_tp_done"):
             state["partial_tp_done"] = True
             await self._move_stop_to_breakeven(ctx, emit, state)
-
-async def on_order_update(
-    self,
-    order: OrderEvent,
-    ctx: StrategyTickContext,
-    emit: CommandEmitter,
-) -> None:
-    """손절 체결 시 정리"""
-    if order.is_filled and order.is_stop_loss:
-        self._increment_trade_count(ctx, ctx.strategy_state)
-        self._clear_trade_state(ctx.strategy_state)
 ```
 
 ---
 
 ## Multi-Timeframe 전략
 
-### ctx.get_bars() 사용
+### ctx.get_ohlcv() 사용
 
 ```python
 async def on_tick(self, ctx: StrategyTickContext, emit: CommandEmitter) -> None:
-    bars_5m = ctx.bars                          # 기본 5분봉
-    bars_15m = await ctx.get_bars("15m", limit=50)
-    bars_1h = await ctx.get_bars("1h", limit=24)
-    bars_4h = await ctx.get_bars("4h", limit=30)
+    ohlcv_5m = ctx.ohlcv                              # 기본 5분봉
+    ohlcv_15m = await ctx.get_ohlcv("15m", limit=50)
+    ohlcv_1h = await ctx.get_ohlcv("1h", limit=24)
+    ohlcv_4h = await ctx.get_ohlcv("4h", limit=30)
+    
+    # 각 timeframe에서 indicator 계산
+    from strategies.indicators import sma
+    
+    sma_5m = sma(ohlcv_5m, {"period": 20})
+    sma_1h = sma(ohlcv_1h, {"period": 20})
+    
+    # 상위 timeframe 추세 확인
+    if sma_1h.iloc[-1] > sma_1h.iloc[-2]:  # 1시간봉 상승 추세
+        # 5분봉에서 진입 신호 찾기
+        pass
 ```
 
 ### 지원 Timeframe
@@ -829,45 +730,57 @@ await emit.cancel_all_orders()
 
 ## 테스트
 
-### 단위 테스트
+### Indicator 단위 테스트
 
 ```python
-# tests/unit/strategies/test_my_strategy.py
+# tests/unit/strategies/indicators/test_trend.py
 
 import pytest
-from decimal import Decimal
-from unittest.mock import AsyncMock, MagicMock
+import pandas as pd
+from datetime import datetime, timezone, timedelta
 
-from strategies.my_strategy import MyStrategy, calculate_atr
-from strategies.base import StrategyTickContext, Bar
+from strategies.indicators.trend import sma, ema
 
 
-class TestPositionSizing:
-    @pytest.fixture
-    def strategy(self) -> MyStrategy:
-        s = MyStrategy()
-        # 파라미터 설정
-        s.risk_per_trade = Decimal("0.02")
-        s.qty_precision = 0
-        return s
+def create_sample_ohlcv(num_rows: int = 50) -> pd.DataFrame:
+    """테스트용 OHLCV DataFrame 생성"""
+    base_time = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    times = [base_time + timedelta(minutes=5 * i) for i in range(num_rows)]
     
-    def test_calculate_position_size(self, strategy: MyStrategy) -> None:
-        qty = strategy._calculate_position_size(
-            account_equity=Decimal("10000"),
-            entry_price=Decimal("100"),
-            stop_loss_price=Decimal("97"),
-        )
+    df = pd.DataFrame({
+        "time": times,
+        "open": [100.0 + i for i in range(num_rows)],
+        "high": [101.0 + i for i in range(num_rows)],
+        "low": [99.0 + i for i in range(num_rows)],
+        "close": [100.5 + i for i in range(num_rows)],
+        "volume": [1000.0] * num_rows,
+    })
+    df["time"] = pd.to_datetime(df["time"], utc=True)
+    df = df.set_index("time")
+    
+    return df
+
+
+class TestSma:
+    def test_sma_basic(self):
+        ohlcv = create_sample_ohlcv()
+        result = sma(ohlcv, {"period": 5})
         
-        # risk_amount = 10000 * 0.02 = 200
-        # stop_distance = |100 - 97| = 3
-        # qty = 200 / 3 = 66.66... → 66 (내림)
-        assert qty == Decimal("66")
+        assert isinstance(result, pd.Series)
+        assert len(result) == len(ohlcv)
+        assert not pd.isna(result.iloc[-1])
+    
+    def test_sma_period_required(self):
+        ohlcv = create_sample_ohlcv()
+        
+        with pytest.raises(ValueError, match="period"):
+            sma(ohlcv, {})
 ```
 
 ### 테스트 실행
 
 ```bash
-.venv\Scripts\python.exe -m pytest tests/unit/strategies/ -v
+.venv\Scripts\python.exe -m pytest tests/unit/strategies/indicators/ -v
 ```
 
 ---
@@ -880,16 +793,15 @@ class TestPositionSizing:
 - [ ] `name`, `version`, `default_params` 구현
 - [ ] `on_init()`, `on_tick()` 구현
 - [ ] `ctx.can_trade` 확인
-- [ ] 리스크 기반 수량 계산 구현 (`_calculate_position_size`)
-- [ ] ATR 또는 다른 방식으로 손절 라인 계산
-- [ ] 50거래 자산 재평가 구현
+- [ ] **`ctx.ohlcv` DataFrame 사용**
+- [ ] **Indicator 모듈 import 및 사용**
+- [ ] 리스크 기반 수량 계산 구현
 
 ### 권장
 
 - [ ] `on_start()`, `on_stop()` 구현
 - [ ] `on_error()` 구현
 - [ ] `on_trade()` 구현 (Break-Even 등)
-- [ ] `on_order_update()` 구현
 - [ ] 단위 테스트 작성
 
 ### secrets.yaml
@@ -897,13 +809,6 @@ class TestPositionSizing:
 - [ ] `strategy.module` 설정
 - [ ] `strategy.class` 설정
 - [ ] `quantity`는 설정하지 않음 (**중요**)
-- [ ] 거래소 제약 파라미터 확인 (`min_qty`, `qty_precision`)
-
-### 배포
-
-- [ ] Testnet에서 충분히 테스트
-- [ ] 로그 확인하여 수량 계산 검증
-- [ ] Production 전환 전 `mode: production` 확인
 
 ---
 
@@ -913,18 +818,19 @@ class TestPositionSizing:
 
 `strategies/examples/atr_risk_strategy.py` 참조
 
+- **OHLCV DataFrame 기반**
+- **Indicator 모듈 사용** (`sma`, `atr`)
 - ATR 기반 손절 라인
 - 2% 룰 동적 수량 계산
-- 50거래 자산 재평가
-- 부분 익절 후 Break-Even
 
 ### SmaCrossStrategy (교육용)
 
 `strategies/examples/sma_cross.py` 참조
 
+- **OHLCV DataFrame 기반**
+- **Indicator 모듈 사용** (`sma`)
 - 단순 SMA 크로스
 - 고정 수량 (교육 목적)
-- 실제 운용에는 부적합
 
 ---
 
