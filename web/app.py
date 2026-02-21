@@ -13,6 +13,11 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from core.config.loader import get_settings
+from core.logging import setup_logging
+
+# 로깅 설정 (콘솔 + 파일)
+setup_logging("web")
+
 from web.routes import (
     health,
     dashboard,

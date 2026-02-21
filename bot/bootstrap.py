@@ -22,9 +22,10 @@ from uuid import uuid4
 from adapters.binance.rest_client import BinanceRestClient
 from adapters.db.sqlite_adapter import SQLiteAdapter, init_schema
 from core.config.loader import get_settings
-from core.constants import BinanceEndpoints, Defaults
+from core.constants import BinanceEndpoints, Defaults, Paths
 from core.domain.events import Event
 from core.domain.state_machines import EngineStateMachine, EngineState
+from core.logging import setup_logging
 from core.storage.command_store import CommandStore
 from core.storage.event_store import EventStore
 from core.storage.config_store import ConfigStore, init_default_configs
@@ -42,13 +43,9 @@ from bot.transfer.manager import TransferManager
 from bot.bnb_fee.manager import BnbFeeManager
 from adapters.slack.notifier import SlackNotifier
 from adapters.upbit.rest_client import UpbitRestClient
-from core.constants import Paths
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
+# 로깅 설정 (콘솔 + 파일)
+setup_logging("bot")
 logger = logging.getLogger("bot")
 
 

@@ -47,6 +47,11 @@ class Paths:
     # 디렉토리
     CONFIG_DIR: Path = PROJECT_ROOT / "config"
     DATA_DIR: Path = PROJECT_ROOT / "data"
+    LOGS_DIR: Path = PROJECT_ROOT / "logs"
+
+    # 로그 서브 디렉토리 (Bot/Web 분리)
+    BOT_LOGS_DIR: Path = LOGS_DIR / "bot"
+    WEB_LOGS_DIR: Path = LOGS_DIR / "web"
 
     # 설정 파일
     SECRETS_FILE: Path = CONFIG_DIR / "secrets.yaml"
