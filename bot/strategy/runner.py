@@ -106,6 +106,34 @@ class StrategyRunner:
         
         # 상태 저장 추적 (마지막 저장된 거래 수)
         self._last_saved_trade_count = 0
+        
+        # 상태 변경 콜백 (BotEngine에서 등록하여 config_store에 즉시 반영)
+        self._on_status_change_callback: Any = None
+    
+    def set_status_change_callback(self, callback: Any) -> None:
+        """상태 변경 콜백 등록
+        
+        전략 시작/중지/로드 시 호출되는 콜백 함수.
+        BotEngine에서 config_store.update_bot_status() 연결에 사용.
+        
+        Args:
+            callback: async def callback(strategy_name: str | None, is_running: bool, action: str)
+                - action: "loaded", "started", "stopped"
+        """
+        self._on_status_change_callback = callback
+    
+    async def _notify_status_change(self, action: str) -> None:
+        """상태 변경 알림 (콜백 호출)
+        
+        Args:
+            action: 액션 타입 ("loaded", "started", "stopped")
+        """
+        if self._on_status_change_callback:
+            strategy_name = self._strategy.name if self._strategy else None
+            try:
+                await self._on_status_change_callback(strategy_name, self._is_running, action)
+            except Exception as e:
+                logger.warning(f"상태 변경 콜백 호출 실패: {e}")
     
     async def load_strategy(
         self,
@@ -152,6 +180,9 @@ class StrategyRunner:
             
             # 로드 이벤트 기록
             await self._record_strategy_event("loaded")
+            
+            # 상태 변경 즉시 알림 (전략 로드됨, 아직 실행 전)
+            await self._notify_status_change("loaded")
             
             logger.info(
                 f"Strategy loaded: {self._strategy.name} v{self._strategy.version}",
@@ -200,6 +231,9 @@ class StrategyRunner:
             
             await self._record_strategy_event("loaded")
             
+            # 상태 변경 즉시 알림 (전략 로드됨, 아직 실행 전)
+            await self._notify_status_change("loaded")
+            
             logger.info(
                 f"Strategy loaded: {strategy.name} v{strategy.version}",
             )
@@ -231,6 +265,9 @@ class StrategyRunner:
         
         await self._record_strategy_event("started")
         
+        # 상태 변경 즉시 알림 (Web에서 확인 가능)
+        await self._notify_status_change("started")
+        
         logger.info(f"Strategy started: {self._strategy.name}")
     
     async def stop(self) -> None:
@@ -250,6 +287,9 @@ class StrategyRunner:
         await self._save_strategy_state()
         
         await self._record_strategy_event("stopped")
+        
+        # 상태 변경 즉시 알림 (Web에서 확인 가능)
+        await self._notify_status_change("stopped")
         
         logger.info(f"Strategy stopped: {self._strategy.name}")
     

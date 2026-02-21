@@ -57,8 +57,8 @@ const DEFAULT_CONFIGS = {
     },
 };
 
-// 읽기 전용 설정 키
-const READONLY_CONFIG_KEYS = ["strategy_state"];
+// 읽기 전용 설정 키 (시스템에서만 변경 가능)
+const READONLY_CONFIG_KEYS = ["strategy_state", "bot_status"];
 
 document.addEventListener('DOMContentLoaded', () => {
     configModal = new bootstrap.Modal(document.getElementById('configModal'));
@@ -185,7 +185,19 @@ async function loadConfigs() {
             return;
         }
         
-        container.innerHTML = configsData.map((config, index) => {
+        // 읽기 전용 설정을 맨 뒤로 정렬
+        const sortedConfigs = [...configsData].sort((a, b) => {
+            const aReadonly = READONLY_CONFIG_KEYS.includes(a.key);
+            const bReadonly = READONLY_CONFIG_KEYS.includes(b.key);
+            if (aReadonly === bReadonly) {
+                return a.key.localeCompare(b.key);  // 같은 그룹 내에서는 알파벳순
+            }
+            return aReadonly ? 1 : -1;  // 읽기 전용은 뒤로
+        });
+        
+        container.innerHTML = sortedConfigs.map((config) => {
+            // 원래 인덱스 찾기 (editConfig에서 사용)
+            const index = configsData.findIndex(c => c.key === config.key);
             const valuePreview = formatValuePreview(config.value);
             const updatedAt = AE.formatKST(config.updated_at);
             const isReadonly = READONLY_CONFIG_KEYS.includes(config.key);

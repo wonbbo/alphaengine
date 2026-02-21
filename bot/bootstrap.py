@@ -105,6 +105,7 @@ class BotEngine:
         # 통계
         self._tick_count = 0
         self._last_strategy_tick = 0.0
+        self._started_at: str | None = None  # Bot 시작 시간 (ISO 형식)
     
     def _create_scope(self) -> Scope:
         """기본 Scope 생성"""
@@ -310,6 +311,7 @@ class BotEngine:
             rest_client=self.rest_client,
             event_store=self.event_store,
             engine_state_setter=self._set_engine_mode,
+            strategy_resume_callback=self._on_engine_resume,
         )
         logger.info("  - CommandExecutor 초기화 완료")
         
@@ -368,6 +370,10 @@ class BotEngine:
             risk_config_getter=self.config_store.get_risk_config,
             config_store=self.config_store,
         )
+        
+        # 전략 상태 변경 시 즉시 config_store에 반영 (Web에서 조회 가능)
+        self.strategy_runner.set_status_change_callback(self._on_strategy_status_change)
+        
         logger.info("  - StrategyRunner 초기화 완료 (ConfigStore 연결, 상태 저장 활성화)")
         
         # 9. WebSocket ↔ StrategyRunner 이벤트 콜백 연결
@@ -437,6 +443,72 @@ class BotEngine:
             logger.info(f"Engine mode changed to {mode}")
         except Exception as e:
             logger.warning(f"Failed to change engine mode: {e}")
+    
+    async def _on_engine_resume(self) -> bool:
+        """엔진 재개 시 전략 시작 콜백
+        
+        엔진이 RUNNING으로 재개될 때 호출됨.
+        - 전략이 없으면: config_store에서 설정 읽어 로드 + 시작
+        - 전략이 있으면: 대기 상태라면 시작
+        
+        주의: auto_start는 Bot 최초 시작 시에만 사용.
+              엔진 재개 시에는 무조건 운용 상태로 전환.
+        
+        Returns:
+            전략 시작 여부
+        """
+        if not self.strategy_runner:
+            return False
+        
+        # 전략이 이미 실행 중이면 건너뜀
+        if self.strategy_runner.is_running:
+            logger.debug("전략이 이미 실행 중")
+            return False
+        
+        # 전략이 로드되어 있으면 시작만
+        if self.strategy_runner.strategy:
+            await self.strategy_runner.start()
+            logger.info(f"전략 시작됨 (엔진 재개): {self.strategy_runner.strategy.name}")
+            
+            await self._send_notification(
+                f"전략 시작됨 (엔진 재개): {self.strategy_runner.strategy.name}",
+                level="INFO",
+                extra={"symbol": self.target_symbol},
+            )
+            return True
+        
+        # 전략이 로드되어 있지 않은 경우 → 설정에서 로드 후 시작
+        strategy_config = await self._load_strategy_config_from_store()
+        module_path = strategy_config.get("module")
+        class_name = strategy_config.get("class")
+        params = strategy_config.get("params", {})
+        
+        if not module_path or not class_name:
+            logger.debug("전략 설정 불완전 (module/class 없음), 전략 없이 엔진만 재개")
+            return False
+        
+        # 전략 로드
+        success = await self.strategy_runner.load_strategy(
+            module_path=module_path,
+            class_name=class_name,
+            params=params,
+        )
+        
+        if not success:
+            logger.warning("전략 로드 실패")
+            return False
+        
+        # 전략 시작
+        await self.strategy_runner.start()
+        strategy_name = self.strategy_runner.strategy.name if self.strategy_runner.strategy else "Unknown"
+        logger.info(f"전략 로드 및 시작됨 (엔진 재개): {strategy_name}")
+        
+        await self._send_notification(
+            f"전략 로드 및 시작됨 (엔진 재개): {strategy_name}",
+            level="INFO",
+            extra={"symbol": self.target_symbol, "params": params},
+        )
+        return True
     
     async def _on_ws_state_change(self, new_state: WebSocketState) -> None:
         """WebSocket 상태 변경 콜백"""
@@ -563,10 +635,23 @@ class BotEngine:
     
     async def start(self) -> None:
         """엔진 시작"""
+        # 시작 시간 기록
+        self._started_at = datetime.now(timezone.utc).isoformat()
+        
         # EngineStarted 이벤트
         started_event = self._create_engine_started_event()
         await self.event_store.append(started_event)
         logger.info("EngineStarted 이벤트 저장 완료")
+        
+        # Bot 상태 초기 저장
+        if self.config_store:
+            await self.config_store.update_bot_status(
+                is_running=True,
+                strategy_name=None,
+                strategy_running=False,
+                tick_count=0,
+                started_at=self._started_at,
+            )
         
         # 초기 상태 동기화
         if self.reconciler:
@@ -640,6 +725,10 @@ class BotEngine:
         stopped_event = self._create_engine_stopped_event()
         await self.event_store.append(stopped_event)
         logger.info("EngineStopped 이벤트 저장 완료")
+        
+        # Bot 상태 초기화 (종료 표시)
+        if self.config_store:
+            await self.config_store.clear_bot_status()
     
     async def run_main_loop(self, shutdown_event: asyncio.Event) -> None:
         """메인 루프
@@ -692,8 +781,62 @@ class BotEngine:
         
         logger.info("메인 루프 종료")
     
+    async def _on_strategy_status_change(
+        self,
+        strategy_name: str | None,
+        is_running: bool,
+        action: str,
+    ) -> None:
+        """전략 상태 변경 콜백 (StrategyRunner에서 호출)
+        
+        전략 로드/시작/중지 시 즉시 config_store에 상태 저장.
+        Web에서 실시간으로 전략 운용 상태를 확인할 수 있게 함.
+        Slack 알림도 함께 전송.
+        
+        Args:
+            strategy_name: 전략 이름 (없으면 None)
+            is_running: 전략 실행 중 여부
+            action: 액션 타입 ("loaded", "started", "stopped")
+        """
+        # config_store에 상태 저장
+        if self.config_store:
+            try:
+                await self.config_store.update_bot_status(
+                    is_running=True,  # Bot은 실행 중
+                    strategy_name=strategy_name,
+                    strategy_running=is_running,
+                    tick_count=self._tick_count,
+                    started_at=self._started_at,
+                )
+                logger.debug(f"전략 상태 변경 저장: {strategy_name}, action={action}, running={is_running}")
+            except Exception as e:
+                logger.warning(f"전략 상태 변경 저장 실패: {e}")
+        
+        # Slack 알림 전송 (액션 타입에 따라 메시지 구분)
+        if strategy_name:
+            extra_info = {"symbol": self.target_symbol, "mode": self.settings.mode.value}
+            
+            if action == "loaded":
+                await self._send_notification(
+                    f"전략 로드됨: {strategy_name}",
+                    level="INFO",
+                    extra=extra_info,
+                )
+            elif action == "started":
+                await self._send_notification(
+                    f"전략 시작됨: {strategy_name}",
+                    level="INFO",
+                    extra=extra_info,
+                )
+            elif action == "stopped":
+                await self._send_notification(
+                    f"전략 중지됨: {strategy_name}",
+                    level="WARNING",
+                    extra=extra_info,
+                )
+    
     async def _log_heartbeat(self) -> None:
-        """Heartbeat 로그"""
+        """Heartbeat 로그 및 상태 저장"""
         stats = {
             "tick": self._tick_count,
             "engine_mode": self.state_machine.state,
@@ -707,10 +850,28 @@ class BotEngine:
             except Exception:
                 stats["pending_commands"] = 0
         
+        # 전략 상태 수집
+        strategy_name = None
+        strategy_running = False
         if self.strategy_runner:
-            stats["strategy"] = self.strategy_runner.strategy.name if self.strategy_runner.strategy else None
+            strategy_name = self.strategy_runner.strategy.name if self.strategy_runner.strategy else None
+            strategy_running = self.strategy_runner.is_running
+            stats["strategy"] = strategy_name
         
         logger.debug(f"Heartbeat: {stats}")
+        
+        # config_store에 Bot 상태 저장 (Web에서 조회 가능)
+        if self.config_store:
+            try:
+                await self.config_store.update_bot_status(
+                    is_running=True,
+                    strategy_name=strategy_name,
+                    strategy_running=strategy_running,
+                    tick_count=self._tick_count,
+                    started_at=self._started_at,
+                )
+            except Exception as e:
+                logger.warning(f"Bot 상태 저장 실패: {e}")
     
     async def load_strategy(
         self,

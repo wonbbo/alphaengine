@@ -13,6 +13,11 @@ from adapters.db.sqlite_adapter import SQLiteAdapter
 
 logger = logging.getLogger(__name__)
 
+# 읽기 전용 설정 키 (시스템에서만 변경 가능, Web API에서 수정/삭제 불가)
+READONLY_CONFIG_KEYS = frozenset({
+    "bot_status",  # Bot 프로세스 상태 (heartbeat 등)
+})
+
 
 class ConfigService:
     """Config 서비스
@@ -76,7 +81,12 @@ class ConfigService:
             
         Raises:
             ValueError: 버전 충돌 시
+            PermissionError: 읽기 전용 설정 수정 시도 시
         """
+        # 읽기 전용 설정 체크
+        if key in READONLY_CONFIG_KEYS:
+            raise PermissionError(f"'{key}'는 읽기 전용 설정입니다. 시스템에서만 변경 가능합니다.")
+        
         now = datetime.now(timezone.utc).isoformat()
         value_json = json.dumps(value, ensure_ascii=False)
         
@@ -141,7 +151,14 @@ class ConfigService:
             
         Returns:
             삭제 성공 여부
+            
+        Raises:
+            PermissionError: 읽기 전용 설정 삭제 시도 시
         """
+        # 읽기 전용 설정 체크
+        if key in READONLY_CONFIG_KEYS:
+            raise PermissionError(f"'{key}'는 읽기 전용 설정입니다. 삭제할 수 없습니다.")
+        
         sql = "DELETE FROM config_store WHERE config_key = ?"
         
         cursor = await self.db.execute(sql, (key,))

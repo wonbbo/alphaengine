@@ -50,10 +50,12 @@ class CommandExecutor:
         rest_client: BinanceRestClient,
         event_store: EventStore,
         engine_state_setter: Any = None,
+        strategy_resume_callback: Any = None,
     ):
         self.rest_client = rest_client
         self.event_store = event_store
         self.engine_state_setter = engine_state_setter
+        self.strategy_resume_callback = strategy_resume_callback
         
         # 핸들러 레지스트리
         self._handlers: dict[str, CommandHandler] = {}
@@ -86,6 +88,7 @@ class CommandExecutor:
         self.register_handler(ResumeEngineHandler(
             event_store=self.event_store,
             engine_state_setter=self.engine_state_setter,
+            strategy_resume_callback=self.strategy_resume_callback,
         ))
         self.register_handler(SetEngineModeHandler(
             event_store=self.event_store,

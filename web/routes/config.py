@@ -71,6 +71,8 @@ async def update_config(
     
     낙관적 락을 사용하여 동시 수정 충돌 방지.
     expected_version을 지정하면 해당 버전일 때만 업데이트.
+    
+    읽기 전용 설정(bot_status 등)은 수정할 수 없습니다.
     """
     service = ConfigService(db)
     
@@ -80,6 +82,11 @@ async def update_config(
             value=request.value,
             updated_by="web:admin",
             expected_version=request.expected_version,
+        )
+    except PermissionError as e:
+        raise HTTPException(
+            status_code=403,
+            detail=str(e)
         )
     except ValueError as e:
         raise HTTPException(
@@ -101,10 +108,19 @@ async def delete_config(
     key: str = Path(..., description="설정 키"),
     db: SQLiteAdapter = Depends(get_db_write),
 ) -> dict[str, str]:
-    """설정 삭제"""
+    """설정 삭제
+    
+    읽기 전용 설정(bot_status 등)은 삭제할 수 없습니다.
+    """
     service = ConfigService(db)
     
-    deleted = await service.delete_config(key)
+    try:
+        deleted = await service.delete_config(key)
+    except PermissionError as e:
+        raise HTTPException(
+            status_code=403,
+            detail=str(e)
+        )
     
     if not deleted:
         raise HTTPException(

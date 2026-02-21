@@ -54,6 +54,15 @@ DEFAULT_CONFIGS: dict[str, dict[str, Any]] = {
         "trade_count_since_reset": 0,  # 마지막 재평가 이후 거래 수
         "total_trade_count": 0,  # 총 거래 수
     },
+    "bot_status": {
+        # Bot 프로세스 상태 (Web에서 조회용)
+        "is_running": False,  # Bot 실행 중 여부
+        "strategy_name": None,  # 현재 전략 이름
+        "strategy_running": False,  # 전략 실행 중 여부
+        "last_heartbeat": None,  # 마지막 heartbeat 시간 (ISO 형식)
+        "tick_count": 0,  # 누적 tick 수
+        "started_at": None,  # Bot 시작 시간 (ISO 형식)
+    },
     "transfer": {
         # 이체 관련 설정
         "min_deposit_krw": 5000,  # 최소 입금 금액 (KRW)
@@ -352,6 +361,74 @@ class ConfigStore:
             trade_count_since_reset=0,
             total_trade_count=0,
         )
+    
+    # =========================================================================
+    # Bot 상태 저장/조회 (Web에서 전략 운용 여부 확인용)
+    # =========================================================================
+    
+    async def get_bot_status(self) -> dict[str, Any]:
+        """Bot 상태 조회
+        
+        Web에서 Bot 실행 여부, 전략 상태를 확인할 때 사용.
+        
+        Returns:
+            Bot 상태 딕셔너리:
+            - is_running: Bot 실행 중 여부
+            - strategy_name: 현재 전략 이름 (없으면 None)
+            - strategy_running: 전략 실행 중 여부
+            - last_heartbeat: 마지막 heartbeat 시간
+            - tick_count: 누적 tick 수
+            - started_at: Bot 시작 시간
+        """
+        return await self.get("bot_status")
+    
+    async def update_bot_status(
+        self,
+        is_running: bool,
+        strategy_name: str | None = None,
+        strategy_running: bool = False,
+        tick_count: int = 0,
+        started_at: str | None = None,
+    ) -> bool:
+        """Bot 상태 업데이트 (heartbeat 포함)
+        
+        Bot 메인 루프에서 주기적으로 호출하여 상태 갱신.
+        
+        Args:
+            is_running: Bot 실행 중 여부
+            strategy_name: 현재 전략 이름
+            strategy_running: 전략 실행 중 여부
+            tick_count: 누적 tick 수
+            started_at: Bot 시작 시간 (첫 호출 시에만 설정)
+            
+        Returns:
+            성공 여부
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        
+        status = {
+            "is_running": is_running,
+            "strategy_name": strategy_name,
+            "strategy_running": strategy_running,
+            "last_heartbeat": now,
+            "tick_count": tick_count,
+            "started_at": started_at,
+        }
+        return await self.set("bot_status", status, updated_by="bot:heartbeat")
+    
+    async def clear_bot_status(self) -> bool:
+        """Bot 상태 초기화 (Bot 종료 시 호출)
+        
+        Bot 프로세스 종료 시 is_running을 False로 설정.
+        
+        Returns:
+            성공 여부
+        """
+        current = await self.get("bot_status")
+        current["is_running"] = False
+        current["strategy_running"] = False
+        current["last_heartbeat"] = datetime.now(timezone.utc).isoformat()
+        return await self.set("bot_status", current, updated_by="bot:shutdown")
 
 
 async def init_default_configs(db: SQLiteAdapter) -> None:

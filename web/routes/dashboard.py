@@ -17,6 +17,7 @@ from web.models.responses import (
     BalanceResponse,
     OpenOrderResponse,
     TradeResponse,
+    BotStatusResponse,
 )
 from web.services.dashboard_service import DashboardService
 
@@ -118,9 +119,20 @@ async def get_dashboard(
     event_count = await service.get_event_count(mode)
     command_pending_count = await service.get_pending_command_count(mode)
     
+    # Bot/전략 상태 조회
+    bot_status_data = await service.get_bot_status()
+    bot_status = BotStatusResponse(
+        is_running=bot_status_data["is_running"],
+        strategy_name=bot_status_data["strategy_name"],
+        strategy_running=bot_status_data["strategy_running"],
+        last_heartbeat=bot_status_data["last_heartbeat"],
+        is_stale=bot_status_data["is_stale"],
+    )
+    
     return DashboardResponse(
         mode=mode,
         symbol=target_symbol,
+        bot_status=bot_status,
         position=position,
         balances=balances,
         open_orders=open_orders,

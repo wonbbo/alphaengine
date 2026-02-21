@@ -68,6 +68,16 @@ class TradeResponse(BaseModel):
     ts: str = Field(..., description="체결 시간")
 
 
+class BotStatusResponse(BaseModel):
+    """Bot 상태 응답"""
+    
+    is_running: bool = Field(default=False, description="Bot 실행 중 여부")
+    strategy_name: str = Field(default="-", description="현재 전략 이름")
+    strategy_running: bool = Field(default=False, description="전략 실행 중 여부")
+    last_heartbeat: str | None = Field(default=None, description="마지막 heartbeat 시간")
+    is_stale: bool = Field(default=False, description="heartbeat 만료 여부 (60초 이상 경과)")
+
+
 class DashboardResponse(BaseModel):
     """대시보드 응답
     
@@ -76,6 +86,9 @@ class DashboardResponse(BaseModel):
     
     mode: str = Field(..., description="거래 모드")
     symbol: str | None = Field(default=None, description="현재 심볼")
+    bot_status: BotStatusResponse = Field(
+        default_factory=BotStatusResponse, description="Bot/전략 상태"
+    )
     position: PositionResponse | None = Field(default=None, description="현재 포지션")
     balances: list[BalanceResponse] = Field(default_factory=list, description="잔고 목록")
     open_orders: list[OpenOrderResponse] = Field(default_factory=list, description="오픈 주문 목록")

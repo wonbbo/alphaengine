@@ -138,6 +138,9 @@ async function loadDashboardData() {
     try {
         const data = await AE.api('/api/dashboard');
         
+        // Bot/전략 상태 업데이트
+        updateBotStatus(data.bot_status);
+        
         // 현재 포지션
         if (data.position && data.position.qty && parseFloat(data.position.qty) !== 0) {
             const pos = data.position;
@@ -212,6 +215,61 @@ async function loadRecentTrades() {
         console.error('Recent trades error:', error);
         document.getElementById('recent-trades').innerHTML = 
             '<tr><td colspan="4" class="text-center text-danger">로드 실패</td></tr>';
+    }
+}
+
+/**
+ * Bot/전략 상태 업데이트
+ */
+function updateBotStatus(botStatus) {
+    if (!botStatus) {
+        document.getElementById('bot-status-badge').className = 'badge bg-secondary';
+        document.getElementById('bot-status-badge').textContent = '알 수 없음';
+        document.getElementById('strategy-name').textContent = '-';
+        document.getElementById('strategy-status-badge').className = 'badge bg-secondary';
+        document.getElementById('strategy-status-badge').textContent = '-';
+        document.getElementById('last-heartbeat').textContent = '-';
+        return;
+    }
+    
+    // Bot 상태 (is_stale 고려)
+    const botBadge = document.getElementById('bot-status-badge');
+    if (botStatus.is_stale) {
+        botBadge.className = 'badge bg-warning';
+        botBadge.textContent = '응답 없음';
+    } else if (botStatus.is_running) {
+        botBadge.className = 'badge bg-success';
+        botBadge.textContent = '실행 중';
+    } else {
+        botBadge.className = 'badge bg-secondary';
+        botBadge.textContent = '중지됨';
+    }
+    
+    // 전략 이름
+    document.getElementById('strategy-name').textContent = botStatus.strategy_name || '-';
+    
+    // 전략 상태
+    const strategyBadge = document.getElementById('strategy-status-badge');
+    if (botStatus.is_stale) {
+        strategyBadge.className = 'badge bg-warning';
+        strategyBadge.textContent = '확인 불가';
+    } else if (botStatus.strategy_running) {
+        strategyBadge.className = 'badge bg-success';
+        strategyBadge.textContent = '운용 중';
+    } else if (botStatus.strategy_name && botStatus.strategy_name !== '-') {
+        strategyBadge.className = 'badge bg-info';
+        strategyBadge.textContent = '대기 중';
+    } else {
+        strategyBadge.className = 'badge bg-secondary';
+        strategyBadge.textContent = '미설정';
+    }
+    
+    // 마지막 heartbeat
+    if (botStatus.last_heartbeat) {
+        const hbTime = AE.formatKST(botStatus.last_heartbeat);
+        document.getElementById('last-heartbeat').textContent = hbTime;
+    } else {
+        document.getElementById('last-heartbeat').textContent = '-';
     }
 }
 

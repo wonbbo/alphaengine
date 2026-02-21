@@ -4,6 +4,7 @@ Dashboard 서비스
 Projection 테이블에서 현재 상태 조회
 """
 
+import json
 import logging
 from datetime import datetime, timezone
 from typing import Any
@@ -11,6 +12,9 @@ from typing import Any
 from adapters.db.sqlite_adapter import SQLiteAdapter
 
 logger = logging.getLogger(__name__)
+
+# heartbeat 만료 시간 (초) - 이 시간 이상 heartbeat가 없으면 Bot 비정상 종료로 판단
+HEARTBEAT_STALE_SECONDS = 60
 
 
 class DashboardService:
@@ -255,3 +259,62 @@ class DashboardService:
             return row[0] if row else 0
         except Exception:
             return 0
+    
+    async def get_bot_status(self) -> dict[str, Any]:
+        """Bot 상태 조회 (config_store에서)
+        
+        Returns:
+            Bot 상태 딕셔너리:
+            - is_running: Bot 실행 중 여부
+            - strategy_name: 현재 전략 이름 ("-"로 표시 시 없음)
+            - strategy_running: 전략 실행 중 여부
+            - last_heartbeat: 마지막 heartbeat 시간
+            - is_stale: heartbeat 만료 여부
+        """
+        default_status = {
+            "is_running": False,
+            "strategy_name": "-",
+            "strategy_running": False,
+            "last_heartbeat": None,
+            "is_stale": False,
+        }
+        
+        sql = """
+            SELECT value_json
+            FROM config_store
+            WHERE config_key = 'bot_status'
+        """
+        
+        try:
+            row = await self.db.fetchone(sql)
+            if not row:
+                return default_status
+            
+            status = json.loads(row[0]) if isinstance(row[0], str) else row[0]
+            
+            # 전략 이름이 없으면 '-' 표시
+            strategy_name = status.get("strategy_name") or "-"
+            
+            # heartbeat 만료 체크
+            is_stale = False
+            last_heartbeat = status.get("last_heartbeat")
+            if last_heartbeat and status.get("is_running"):
+                try:
+                    hb_time = datetime.fromisoformat(last_heartbeat.replace("Z", "+00:00"))
+                    now = datetime.now(timezone.utc)
+                    diff_seconds = (now - hb_time).total_seconds()
+                    is_stale = diff_seconds > HEARTBEAT_STALE_SECONDS
+                except Exception:
+                    is_stale = True
+            
+            return {
+                "is_running": status.get("is_running", False) and not is_stale,
+                "strategy_name": strategy_name,
+                "strategy_running": status.get("strategy_running", False) and not is_stale,
+                "last_heartbeat": last_heartbeat,
+                "is_stale": is_stale,
+            }
+            
+        except Exception as e:
+            logger.warning(f"Bot 상태 조회 실패: {e}")
+            return default_status

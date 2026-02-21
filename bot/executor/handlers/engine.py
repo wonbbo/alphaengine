@@ -99,19 +99,23 @@ class ResumeEngineHandler(CommandHandler):
     """ResumeEngine Command 핸들러
     
     엔진을 RUNNING 상태로 복귀.
+    전략이 로드되어 있고 auto_start=true인 경우 자동 시작.
     
     Args:
         event_store: 이벤트 저장소
         engine_state_setter: 엔진 상태 변경 함수
+        strategy_resume_callback: 전략 재개 콜백 (선택)
     """
     
     def __init__(
         self,
         event_store: EventStore,
         engine_state_setter: Any,
+        strategy_resume_callback: Any = None,
     ):
         self.event_store = event_store
         self.engine_state_setter = engine_state_setter
+        self.strategy_resume_callback = strategy_resume_callback
     
     @property
     def command_type(self) -> str:
@@ -161,7 +165,17 @@ class ResumeEngineHandler(CommandHandler):
                 },
             )
             
-            return True, {"status": "RUNNING"}, None, events
+            # 전략 재개 콜백 호출 (auto_start 확인 및 전략 시작)
+            strategy_started = False
+            if self.strategy_resume_callback:
+                try:
+                    strategy_started = await self.strategy_resume_callback()
+                    if strategy_started:
+                        logger.info("Strategy auto-started on engine resume")
+                except Exception as e:
+                    logger.warning(f"Strategy resume callback failed: {e}")
+            
+            return True, {"status": "RUNNING", "strategy_started": strategy_started}, None, events
             
         except Exception as e:
             error_msg = str(e)
