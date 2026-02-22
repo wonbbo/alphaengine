@@ -122,8 +122,13 @@ const AlphaEngine = {
      */
     formatVenue(venue) {
         const venues = {
+            // 전체 명칭 (BINANCE_*)
             'BINANCE_SPOT': { label: '현물', color: 'bg-warning text-dark', icon: 'bi-coin' },
             'BINANCE_FUTURES': { label: '선물', color: 'bg-primary', icon: 'bi-graph-up-arrow' },
+            // 축약 명칭 (API 응답용)
+            'SPOT': { label: '현물', color: 'bg-warning text-dark', icon: 'bi-coin' },
+            'FUTURES': { label: '선물', color: 'bg-primary', icon: 'bi-graph-up-arrow' },
+            // 기타
             'EXTERNAL': { label: '외부', color: 'bg-external', icon: 'bi-box-arrow-up-right' },
             'SYSTEM': { label: '시스템', color: 'bg-system', icon: 'bi-gear' },
         };
