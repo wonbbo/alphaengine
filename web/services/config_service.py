@@ -16,6 +16,16 @@ logger = logging.getLogger(__name__)
 # 읽기 전용 설정 키 (시스템에서만 변경 가능, Web API에서 수정/삭제 불가)
 READONLY_CONFIG_KEYS = frozenset({
     "bot_status",  # Bot 프로세스 상태 (heartbeat 등)
+    "strategy_state",  # 전략 상태 (Bot이 거래 시 자동 저장)
+    "price_cache",  # 가격 캐시 (PriceCachePoller가 주기적 업데이트)
+    "initial_capital",  # 초기 자산 (InitialCapitalRecorder가 최초 실행 시 기록)
+    # Poller 상태 (각 Poller가 폴링 시 자동 저장)
+    "poller_income_last_poll",
+    "poller_transfer_last_poll",
+    "poller_convert_last_poll",
+    "poller_deposit_withdraw_last_poll",
+    "poller_reconciliation_last_poll",
+    "poller_reconciliation_last_reconciliation",
 })
 
 

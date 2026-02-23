@@ -73,10 +73,10 @@ async def create_connection(
     # 외래 키 제약 활성화
     await conn.execute("PRAGMA foreign_keys=ON")
     
-    logger.info(
-        "SQLite 연결 생성",
-        extra={"db_path": db_path_str, "readonly": readonly},
-    )
+    # logger.info(
+    #     "SQLite 연결 생성",
+    #     extra={"db_path": db_path_str, "readonly": readonly},
+    # )
     
     return conn
 
@@ -125,7 +125,7 @@ class SQLiteAdapter:
         if self._conn is not None:
             await self._conn.close()
             self._conn = None
-            logger.info("SQLite 연결 종료")
+            # logger.info("SQLite 연결 종료")
     
     async def execute(
         self,

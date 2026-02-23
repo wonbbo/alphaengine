@@ -21,6 +21,7 @@ async function initDashboard() {
     // 폴링 시작 (30초)
     pollingId = AE.startPolling(async () => {
         await loadPnLSummary();
+        await loadAssets();
         await loadDashboardData();
     }, 30000);
 }
@@ -50,9 +51,7 @@ async function loadPnLSummary() {
         document.getElementById('monthly-return').textContent = 
             `${AE.formatPercent(data.monthly_return_pct)}`;
         
-        // 총 자산
-        document.getElementById('total-equity').textContent = 
-            `${AE.formatNumber(data.current_equity)} USDT`;
+        // 총 자산은 loadAssets()에서 total_usdt로 표시 (선물+현물 전체 USDT 환산)
         const totalReturn = AE.formatAmount(data.total_return_pct);
         document.getElementById('total-return').innerHTML = 
             `<span class="${totalReturn.class}">${AE.formatPercent(data.total_return_pct)}</span>`;
@@ -95,42 +94,44 @@ async function loadCharts() {
 
 async function loadAssets() {
     try {
-        const data = await AE.api('/api/ledger/portfolio');
+        const data = await AE.api('/api/assets');
         
         const tbody = document.getElementById('assets-table');
         
-        if (!data || data.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="3" class="text-center text-muted">자산 없음</td></tr>';
-            document.getElementById('total-assets').textContent = '0.00 USDT';
+        if (!data || !data.assets || data.assets.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="4" class="text-center text-muted">자산 없음</td></tr>';
+            document.getElementById('total-assets').textContent = '0.0000 USDT';
+            document.getElementById('total-equity').textContent = '0.0000 USDT';
             return;
         }
         
-        let totalUsdt = 0;
+        // 선물+현물 전체 USDT 환산 합계
+        const totalUsdt = data.total_usdt ?? 0;
         
-        tbody.innerHTML = data.map(asset => {
+        tbody.innerHTML = data.assets.map(asset => {
             const balance = parseFloat(asset.balance) || 0;
-            
-            // USDT 환산
-            if (asset.asset === 'USDT') {
-                totalUsdt += balance;
-            }
-            
+            const usdtValue = parseFloat(asset.usdt_value) || 0;
             return `
                 <tr>
                     <td>${AE.formatVenue(asset.venue)}</td>
                     <td>${asset.asset || '-'}</td>
                     <td class="text-end">${AE.formatNumber(balance, 4)}</td>
+                    <td class="text-end">${AE.formatNumber(usdtValue, 4)}</td>
                 </tr>
             `;
         }).join('');
         
         document.getElementById('total-assets').textContent = 
-            `${AE.formatNumber(totalUsdt, 2)} USDT`;
+            `${AE.formatNumber(totalUsdt, 4)} USDT`;
+        
+        // 총 자산 카드도 동일한 값으로 표시
+        document.getElementById('total-equity').textContent = 
+            `${AE.formatNumber(totalUsdt, 4)} USDT`;
         
     } catch (error) {
         console.error('Assets error:', error);
         document.getElementById('assets-table').innerHTML = 
-            '<tr><td colspan="3" class="text-center text-danger">로드 실패</td></tr>';
+            '<tr><td colspan="4" class="text-center text-danger">로드 실패</td></tr>';
     }
 }
 

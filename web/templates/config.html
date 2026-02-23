@@ -4,18 +4,47 @@
 
 {% block content %}
 <div class="row mb-3 mb-md-4">
-    <div class="col-12 d-flex flex-column flex-sm-row justify-content-between align-items-start align-items-sm-center gap-2">
+    <div class="col-12">
         <h2 class="mb-0"><i class="bi bi-sliders"></i> 설정</h2>
-        <button class="btn btn-primary btn-sm" onclick="showAddModal()">
-            <i class="bi bi-plus-lg"></i> 새 설정 추가
-        </button>
     </div>
 </div>
 
-<div class="row" id="configs-container">
-    <div class="col-12 text-center py-4">
-        <div class="spinner-border"></div>
-        <p class="mt-2 text-muted">로딩 중...</p>
+<div id="configs-container">
+    <!-- 로딩 중 -->
+    <div class="row" id="configs-loading">
+        <div class="col-12 text-center py-4">
+            <div class="spinner-border"></div>
+            <p class="mt-2 text-muted">로딩 중...</p>
+        </div>
+    </div>
+    <!-- 편집 가능 / 편집 불가 섹션 (로드 후 표시) -->
+    <div id="configs-accordion-wrapper" style="display: none;">
+        <div class="accordion" id="configs-accordion">
+            <div class="accordion-item">
+                <h2 class="accordion-header">
+                    <button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#editable-configs" aria-expanded="true" aria-controls="editable-configs">
+                        <i class="bi bi-pencil-square me-2"></i> 편집 가능한 설정 (<span id="editable-count">0</span>개)
+                    </button>
+                </h2>
+                <div id="editable-configs" class="accordion-collapse collapse show" data-bs-parent="#configs-accordion">
+                    <div class="accordion-body">
+                        <div class="row" id="editable-configs-grid"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="accordion-item">
+                <h2 class="accordion-header">
+                    <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#readonly-configs" aria-expanded="false" aria-controls="readonly-configs">
+                        <i class="bi bi-lock me-2"></i> 편집 불가 설정 (<span id="readonly-count">0</span>개)
+                    </button>
+                </h2>
+                <div id="readonly-configs" class="accordion-collapse collapse" data-bs-parent="#configs-accordion">
+                    <div class="accordion-body">
+                        <div class="row" id="readonly-configs-grid"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 </div>
 
@@ -39,6 +68,10 @@
                 
                 <!-- Key-Value 편집 모드 -->
                 <div id="kv-edit-mode">
+                    <div id="config-desc-alert" class="alert alert-info small mb-3" style="display: none;">
+                        <i class="bi bi-info-circle me-1"></i>
+                        <span id="config-desc-text"></span>
+                    </div>
                     <div id="kv-fields-container">
                         <!-- 동적으로 필드가 생성됨 -->
                     </div>
@@ -61,7 +94,7 @@
                     <i class="bi bi-exclamation-circle"></i> 변경됨
                 </span>
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">취소</button>
-                <button type="button" class="btn btn-primary" onclick="saveConfig()">
+                <button type="button" class="btn btn-primary" id="save-btn" onclick="saveConfig()">
                     <i class="bi bi-check-lg"></i> 저장
                 </button>
             </div>
@@ -69,36 +102,6 @@
     </div>
 </div>
 
-<!-- 새 설정 추가 모달 -->
-<div class="modal fade" id="addConfigModal" tabindex="-1">
-    <div class="modal-dialog modal-lg">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title">새 설정 추가</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-            </div>
-            <div class="modal-body">
-                <form id="add-config-form">
-                    <div class="mb-3">
-                        <label class="form-label">Key</label>
-                        <input type="text" class="form-control" id="new-config-key" required>
-                        <small class="text-muted">예: strategy_params, risk_config</small>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Value (JSON)</label>
-                        <textarea class="form-control font-monospace" id="new-config-value" rows="10" required>{}</textarea>
-                    </div>
-                </form>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">취소</button>
-                <button type="button" class="btn btn-primary" onclick="addConfig()">
-                    <i class="bi bi-plus-lg"></i> 추가
-                </button>
-            </div>
-        </div>
-    </div>
-</div>
 {% endblock %}
 
 {% block scripts %}
