@@ -38,6 +38,17 @@ const AlphaEngine = {
     },
     
     /**
+     * 수량 포맷팅 (끝의 0 제거)
+     * 예: 10.0 -> 10, 23.12340 -> 23.1234
+     */
+    formatQuantity(value) {
+        if (value === null || value === undefined || value === '') return '-';
+        const num = parseFloat(value);
+        if (isNaN(num)) return String(value);
+        return num.toString();
+    },
+
+    /**
      * 숫자 포맷팅
      */
     formatNumber(value, decimals = 2) {

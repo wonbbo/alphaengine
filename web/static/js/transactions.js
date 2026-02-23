@@ -53,8 +53,8 @@ async function loadTransactions() {
             return `
                 <tr>
                     <td>${timeStr}</td>
-                    <td class="text-end">${tx.bought_qty || '-'}</td>
-                    <td class="text-end">${tx.sold_qty || '-'}</td>
+                    <td class="text-end">${AE.formatQuantity(tx.bought_qty)}</td>
+                    <td class="text-end">${AE.formatQuantity(tx.sold_qty)}</td>
                     <td class="text-end d-none d-sm-table-cell">${AE.formatCommission(tx.fee_usdt || 0)}</td>
                     <td class="text-end ${pnl.class}">${pnl.text}</td>
                 </tr>

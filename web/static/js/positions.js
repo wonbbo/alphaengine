@@ -96,7 +96,7 @@ async function loadPositions() {
                     <td class="d-none d-md-table-cell">${closedAt}</td>
                     <td>${AE.statusBadge(pos.side)}</td>
                     <td class="d-none d-sm-table-cell">${AE.statusBadge(pos.status)}</td>
-                    <td class="text-end d-none d-lg-table-cell">${pos.max_qty || '-'}</td>
+                    <td class="text-end d-none d-lg-table-cell">${AE.formatQuantity(pos.max_qty)}</td>
                     <td class="text-end ${pnl.class}">${pnl.text}</td>
                     <td class="text-end d-none d-md-table-cell ${cumPnl.class}">${cumPnl.text}</td>
                     <td class="text-center d-none d-sm-table-cell">${pos.trade_count || 0}</td>
@@ -210,8 +210,8 @@ async function loadPositionDetail(sessionId) {
         // 상세 정보
         document.getElementById('detail-opened-at').textContent = AE.formatKST(data.opened_at);
         document.getElementById('detail-closed-at').textContent = data.closed_at ? AE.formatKST(data.closed_at) : '-';
-        document.getElementById('detail-initial-qty').textContent = data.initial_qty || '-';
-        document.getElementById('detail-max-qty').textContent = data.max_qty || '-';
+        document.getElementById('detail-initial-qty').textContent = AE.formatQuantity(data.initial_qty);
+        document.getElementById('detail-max-qty').textContent = AE.formatQuantity(data.max_qty);
         document.getElementById('detail-trade-count').textContent = data.trade_count || 0;
         document.getElementById('detail-commission').textContent = `${AE.formatCommission(data.total_commission)} USDT`;
         document.getElementById('detail-close-reason').textContent = data.close_reason || '-';
@@ -245,11 +245,11 @@ async function loadPositionTrades(sessionId) {
                 <tr>
                     <td>${timeStr}</td>
                     <td>${AE.statusBadge(actionDisplay)}</td>
-                    <td class="text-end">${trade.qty || '-'}</td>
+                    <td class="text-end">${AE.formatQuantity(trade.qty)}</td>
                     <td class="text-end d-none d-sm-table-cell">${AE.formatPrice(trade.price)}</td>
                     <td class="text-end ${pnl.class}">${pnl.text}</td>
                     <td class="text-end d-none d-md-table-cell">${AE.formatCommission(trade.commission)}</td>
-                    <td class="text-end d-none d-lg-table-cell">${trade.position_qty_after || '0'}</td>
+                    <td class="text-end d-none d-lg-table-cell">${AE.formatQuantity(trade.position_qty_after ?? '0')}</td>
                 </tr>
             `;
         }).join('');
@@ -269,7 +269,7 @@ async function loadPositionTrades(sessionId) {
                     <div class="d-flex justify-content-between">
                         <div>
                             <strong>${trade.action}</strong>
-                            <span class="text-muted ms-2">${trade.qty} @ ${AE.formatPrice(trade.price)}</span>
+                            <span class="text-muted ms-2">${AE.formatQuantity(trade.qty)} @ ${AE.formatPrice(trade.price)}</span>
                         </div>
                         <small class="text-muted">${timeStr}</small>
                     </div>

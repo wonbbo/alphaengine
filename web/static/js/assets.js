@@ -28,12 +28,13 @@ async function loadAssets() {
         tbody.innerHTML = data.assets.map(asset => {
             const balance = parseFloat(asset.balance) || 0;
             const lastUpdated = asset.last_updated ? AE.formatKST(asset.last_updated) : '-';
+            const unit = asset.asset || 'USDT';
             
             return `
                 <tr>
                     <td>${AE.formatVenue(asset.venue)}</td>
                     <td><strong>${asset.asset || '-'}</strong></td>
-                    <td class="text-end">${AE.formatNumber(balance, 4)}</td>
+                    <td class="text-end">${AE.formatNumber(balance, 4)} ${unit}</td>
                     <td class="d-none d-sm-table-cell">${lastUpdated}</td>
                 </tr>
             `;
@@ -79,6 +80,8 @@ async function loadTrialBalance() {
         tbody.innerHTML = data.map(item => {
             const balance = parseFloat(item.balance) || 0;
             const balanceClass = balance > 0 ? 'text-success' : (balance < 0 ? 'text-danger' : '');
+            // asset이 없으면 SYSTEM 계정(수수료, PnL 등)으로 USDT 단위 가정
+            const unit = item.asset || 'USDT';
             
             return `
                 <tr>
@@ -86,7 +89,7 @@ async function loadTrialBalance() {
                     <td>${AE.formatAccountType(item.account_type)}</td>
                     <td>${AE.formatVenue(item.venue)}</td>
                     <td class="d-none d-sm-table-cell">${item.asset || '-'}</td>
-                    <td class="text-end ${balanceClass}">${AE.formatNumber(balance, 4)}</td>
+                    <td class="text-end ${balanceClass}">${AE.formatNumber(balance, 4)} ${unit}</td>
                 </tr>
             `;
         }).join('');
