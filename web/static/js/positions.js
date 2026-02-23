@@ -273,7 +273,7 @@ async function loadPositionTrades(sessionId) {
                         </div>
                         <small class="text-muted">${timeStr}</small>
                     </div>
-                    ${trade.realized_pnl ? `<small class="${parseFloat(trade.realized_pnl) >= 0 ? 'text-success' : 'text-danger'}">PnL: ${AE.formatNumber(trade.realized_pnl)} USDT</small>` : ''}
+                    ${trade.realized_pnl ? `<small class="${parseFloat(trade.realized_pnl) >= 0 ? 'text-success' : 'text-danger'}">수익: ${AE.formatNumber(trade.realized_pnl)} USDT</small>` : ''}
                 </div>
             `;
         }).join('');
