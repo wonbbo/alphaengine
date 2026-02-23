@@ -69,6 +69,10 @@ class DepositStatusResponse(BaseModel):
     
     can_deposit: bool
     krw_balance: str
+    krw_withdrawable: str | None = None  # 24시간 이내 입금 제외한 인출 가능 금액
+    krw_locked_24h: str | None = None  # 24시간 이내 입금 합계 (출금 불가)
+    krw_locked_24h_detail: list[dict[str, Any]] | None = None  # 24시간 이내 입금 내역
+    max_deposit_krw: str | None = None  # 실제 입금 가능 최대 금액
     trx_balance: str
     trx_price_krw: str
     trx_value_krw: str
@@ -77,6 +81,12 @@ class DepositStatusResponse(BaseModel):
     min_deposit_krw: str
     pending_deposit: bool
     pending_transfer_id: str | None
+    # 예상 FUTURES USDT 입금액 계산용 시세 정보
+    trx_usdt_price: str | None = None
+    trx_krw_price: str | None = None
+    network_fee_trx: str | None = None
+    binance_trade_fee_rate: str | None = None
+    upbit_trade_fee_rate: str | None = None
 
 
 class WithdrawStatusResponse(BaseModel):

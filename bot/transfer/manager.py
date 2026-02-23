@@ -62,6 +62,7 @@ class TransferManager:
             binance=binance,
             repository=self.repository,
             binance_trx_address=binance_trx_address,
+            db=db,
         )
         
         self.withdraw_handler = WithdrawHandler(
@@ -169,6 +170,15 @@ class TransferManager:
         status = await self.deposit_handler.get_deposit_status()
         if not status.get("can_deposit"):
             raise ValueError("입금 불가 상태입니다. 잔고를 확인해주세요.")
+        
+        # 인출 가능 금액 초과 검증 (24시간 이내 입금 제외)
+        max_deposit_krw = Decimal(status.get("max_deposit_krw", "0"))
+        if amount_krw > max_deposit_krw:
+            raise ValueError(
+                f"입금 가능 금액을 초과했습니다. "
+                f"실제 입금 가능: {max_deposit_krw:,.0f}원 "
+                f"(24시간 이내 입금은 출금 불가)"
+            )
         
         # Transfer 생성
         transfer = await self.repository.create(

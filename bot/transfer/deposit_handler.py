@@ -13,12 +13,15 @@ Upbit KRW -> Binance Futures USDT 입금 흐름 처리.
 
 import asyncio
 import logging
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
 
 from adapters.binance.rest_client import BinanceRestClient
+from adapters.db.sqlite_adapter import SQLiteAdapter
 from adapters.upbit.rest_client import UpbitRestClient
 from bot.transfer.repository import Transfer, TransferRepository
+from core.storage.config_store import ConfigStore
 from core.types import TransferStatus
 
 logger = logging.getLogger(__name__)
@@ -34,9 +37,15 @@ class DepositHandler:
         binance: Binance REST 클라이언트
         repository: Transfer 저장소
         binance_trx_address: Binance TRX 입금 주소
+        db: DB 어댑터 (ConfigStore용, 24시간 입금 제한 설정 조회)
     """
     
     TOTAL_STEPS = 6
+    
+    # 수수료 비율 (출금과 동일)
+    UPBIT_TRADE_FEE_RATE = Decimal("0.0005")  # Upbit 거래 수수료 0.05%
+    BINANCE_TRADE_FEE_RATE = Decimal("0.001")  # Binance 거래 수수료 0.1%
+    NETWORK_FEE_TRX = Decimal("1")  # TRX 출금 수수료
     
     def __init__(
         self,
@@ -44,11 +53,13 @@ class DepositHandler:
         binance: BinanceRestClient,
         repository: TransferRepository,
         binance_trx_address: str,
+        db: SQLiteAdapter | None = None,
     ):
         self.upbit = upbit
         self.binance = binance
         self.repository = repository
         self.binance_trx_address = binance_trx_address
+        self.db = db
     
     async def execute(self, transfer: Transfer) -> Transfer:
         """입금 실행
@@ -344,8 +355,116 @@ class DepositHandler:
         """입금 가능 상태 조회
         
         Upbit 잔고와 TRX 시세를 조합하여 입금 가능 여부 판단.
+        24시간 이내 KRW 입금은 출금 불가이므로 인출 가능 금액만 입금에 사용.
+        예상 FUTURES USDT 입금액 계산용 시세 정보 포함.
         
         Returns:
             입금 상태 정보
         """
-        return await self.upbit.get_deposit_status()
+        base_status = await self.upbit.get_deposit_status()
+        
+        # 24시간 이내 KRW 입금 조회 및 인출 가능 금액 계산
+        krw_locked_24h, krw_locked_detail = await self._get_krw_locked_within_hold_period()
+        krw_balance = Decimal(base_status["krw_balance"])
+        krw_withdrawable = max(Decimal("0"), krw_balance - krw_locked_24h)
+        fee_krw = Decimal(base_status["fee_krw"])
+        min_deposit_krw = Decimal(base_status["min_deposit_krw"])
+        
+        # 인출 가능 금액 기준으로 입금 가능 여부 재계산
+        has_enough_withdrawable = krw_withdrawable >= (min_deposit_krw + fee_krw)
+        can_deposit = (
+            base_status["can_deposit"]
+            and has_enough_withdrawable
+        )
+        
+        # 예상 FUTURES USDT 입금액 계산용 시세 정보
+        price_info = await self._get_price_info()
+        
+        # 최대 입금 가능 금액 (인출 가능 금액 - 수수료)
+        max_deposit_krw = max(Decimal("0"), krw_withdrawable - fee_krw)
+        
+        base_status.update({
+            "can_deposit": can_deposit,
+            "krw_withdrawable": str(krw_withdrawable),
+            "krw_locked_24h": str(krw_locked_24h),
+            "krw_locked_24h_detail": krw_locked_detail,
+            "max_deposit_krw": str(max_deposit_krw),
+            # 예상 입금 계산용 시세 정보
+            "trx_usdt_price": price_info["trx_usdt_price"],
+            "trx_krw_price": price_info["trx_krw_price"],
+            "network_fee_trx": str(self.NETWORK_FEE_TRX),
+            "binance_trade_fee_rate": str(self.BINANCE_TRADE_FEE_RATE),
+            "upbit_trade_fee_rate": str(self.UPBIT_TRADE_FEE_RATE),
+        })
+        
+        return base_status
+    
+    async def _get_krw_locked_within_hold_period(
+        self,
+    ) -> tuple[Decimal, list[dict[str, Any]]]:
+        """24시간(설정값) 이내 KRW 입금 합계 조회
+        
+        Upbit 정책: KRW 입금 후 일정 시간 이내에는 출금 불가.
+        
+        Returns:
+            (잠긴 금액 합계, 입금 내역 목록)
+        """
+        hold_hours = 24
+        if self.db:
+            try:
+                config_store = ConfigStore(self.db)
+                transfer_config = await config_store.get("transfer")
+                hold_hours = int(transfer_config.get("krw_deposit_hold_hours", 24))
+            except Exception as e:
+                logger.warning(f"ConfigStore 조회 실패, 기본값 24시간 사용: {e}")
+        
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=hold_hours)
+        krw_locked = Decimal("0")
+        detail: list[dict[str, Any]] = []
+        
+        try:
+            deposits = await self.upbit.get_deposits(currency="KRW", limit=100)
+            for d in deposits:
+                # 완료된 입금만 (Upbit API: ACCEPTED)
+                if d.state.upper() != "ACCEPTED":
+                    continue
+                deposit_time = d.done_at if d.done_at else d.created_at
+                if deposit_time.tzinfo is None:
+                    deposit_time = deposit_time.replace(tzinfo=timezone.utc)
+                if deposit_time >= cutoff:
+                    krw_locked += d.amount
+                    detail.append({
+                        "amount": str(d.amount),
+                        "done_at": deposit_time.isoformat(),
+                    })
+        except Exception as e:
+            logger.warning(f"Upbit KRW 입금 내역 조회 실패: {e}")
+        
+        return krw_locked, detail
+    
+    async def _get_price_info(self) -> dict[str, str]:
+        """TRX 시세 정보 조회 (예상 입금 USDT 계산용)
+        
+        Returns:
+            trx_usdt_price, trx_krw_price
+        """
+        trx_usdt_price = "0"
+        trx_krw_price = "0"
+        
+        try:
+            ticker = await self.binance.get_ticker_price("TRXUSDT")
+            trx_usdt_price = ticker.get("price", "0")
+        except Exception as e:
+            logger.warning(f"TRX/USDT 시세 조회 실패: {e}")
+        
+        try:
+            ticker = await self.upbit.get_ticker("KRW-TRX")
+            if ticker:
+                trx_krw_price = str(ticker.trade_price)
+        except Exception as e:
+            logger.warning(f"TRX/KRW 시세 조회 실패: {e}")
+        
+        return {
+            "trx_usdt_price": trx_usdt_price,
+            "trx_krw_price": trx_krw_price,
+        }

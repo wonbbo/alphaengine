@@ -15,6 +15,15 @@ let withdrawPriceInfo = {
     upbitTradeRate: 0.0005,
 };
 
+// 입금 예상 USDT 계산용 시세 정보
+let depositPriceInfo = {
+    trxUsdtPrice: 0,
+    trxKrwPrice: 0,
+    networkFeeTrx: 1,
+    binanceTradeRate: 0.001,
+    upbitTradeRate: 0.0005,
+};
+
 // =========================================================================
 // 입금 상태
 // =========================================================================
@@ -44,9 +53,33 @@ async function loadDepositStatus() {
         const data = await response.json();
         
         if (data.can_deposit && !data.pending_deposit) {
+            // 시세 정보 저장 (예상 USDT 계산용)
+            depositPriceInfo = {
+                trxUsdtPrice: parseFloat(data.trx_usdt_price || 0),
+                trxKrwPrice: parseFloat(data.trx_krw_price || 0),
+                networkFeeTrx: parseFloat(data.network_fee_trx || 1),
+                binanceTradeRate: parseFloat(data.binance_trade_fee_rate || 0.001),
+                upbitTradeRate: parseFloat(data.upbit_trade_fee_rate || 0.0005),
+            };
+            
+            // 24시간 이내 입금 경고 HTML
+            const krwLocked24h = parseFloat(data.krw_locked_24h || 0);
+            const krwWithdrawable = parseFloat(data.krw_withdrawable || data.krw_balance);
+            const maxDepositKrw = parseFloat(data.max_deposit_krw || 0);
+            const has24hWarning = krwLocked24h > 0;
+            
+            const krwWarningHtml = has24hWarning ? `
+                <div class="alert alert-warning py-2 px-3 small mb-2">
+                    <i class="bi bi-exclamation-triangle"></i> 
+                    <strong>24시간 이내 입금 ${formatNumber(krwLocked24h)}원</strong>은 출금 불가합니다.
+                    <br><span class="text-muted">실제 입금 가능: ${formatNumber(krwWithdrawable)}원</span>
+                </div>
+            ` : '';
+            
             // 입금 가능
             statusDiv.innerHTML = `
                 <div class="balance-info">
+                    ${krwWarningHtml}
                     <div class="row">
                         <div class="col-6">
                             <div class="balance-label">KRW 잔고</div>
@@ -59,12 +92,18 @@ async function loadDepositStatus() {
                     </div>
                     <div class="row mt-2">
                         <div class="col-6">
-                            <div class="balance-label">TRX 가격</div>
-                            <div class="balance-value">${formatNumber(data.trx_price_krw)}원</div>
+                            <div class="balance-label">실제 입금 가능</div>
+                            <div class="balance-value text-success fw-bold">${formatNumber(krwWithdrawable)}원</div>
                         </div>
                         <div class="col-6">
                             <div class="balance-label">예상 수수료</div>
                             <div class="balance-value">~${formatNumber(data.fee_krw)}원</div>
+                        </div>
+                    </div>
+                    <div class="row mt-2">
+                        <div class="col-6">
+                            <div class="balance-label">TRX 가격</div>
+                            <div class="balance-value">${formatNumber(data.trx_price_krw)}원</div>
                         </div>
                     </div>
                 </div>
@@ -72,9 +111,14 @@ async function loadDepositStatus() {
             form.classList.remove('d-none');
             unavailable.classList.add('d-none');
             
-            // 최대 입금 가능 금액 설정
-            maxDepositAmount = Math.floor(parseFloat(data.krw_balance) - parseFloat(data.fee_krw));
+            // 최대 입금 가능 금액 설정 (인출 가능 금액 - 수수료 기준)
+            maxDepositAmount = Math.floor(maxDepositKrw);
             document.getElementById('deposit-amount').max = maxDepositAmount;
+            
+            // 예상 금액 계산 이벤트 바인딩
+            const amountInput = document.getElementById('deposit-amount');
+            amountInput.removeEventListener('input', updateDepositEstimate);
+            amountInput.addEventListener('input', updateDepositEstimate);
             
         } else if (data.pending_deposit) {
             // 입금 진행 중
@@ -89,12 +133,24 @@ async function loadDepositStatus() {
             loadTransferProgress(data.pending_transfer_id);
             
         } else {
-            // 입금 불가 - 현재 잔고 정보 함께 표시
+            // 입금 불가 - 현재 잔고 및 24시간 경고 함께 표시
             const krwBalance = parseFloat(data.krw_balance || 0);
+            const krwWithdrawable = parseFloat(data.krw_withdrawable || krwBalance);
+            const krwLocked24h = parseFloat(data.krw_locked_24h || 0);
             const trxBalance = parseFloat(data.trx_balance || 0);
+            
+            const has24hWarning = krwLocked24h > 0;
+            const krwWarningHtml = has24hWarning ? `
+                <div class="alert alert-warning py-2 px-3 small mb-2">
+                    <i class="bi bi-exclamation-triangle"></i> 
+                    24시간 이내 입금 ${formatNumber(krwLocked24h)}원은 출금 불가합니다.
+                    <br><span class="text-muted">실제 입금 가능: ${formatNumber(krwWithdrawable)}원</span>
+                </div>
+            ` : '';
             
             statusDiv.innerHTML = `
                 <div class="balance-info mb-3">
+                    ${krwWarningHtml}
                     <div class="row">
                         <div class="col-6">
                             <div class="balance-label">KRW 잔고</div>
@@ -105,12 +161,22 @@ async function loadDepositStatus() {
                             <div class="balance-value">${formatNumber(trxBalance)} TRX</div>
                         </div>
                     </div>
+                    ${has24hWarning ? `
+                    <div class="row mt-2">
+                        <div class="col-12">
+                            <div class="balance-label">실제 입금 가능</div>
+                            <div class="balance-value text-success">${formatNumber(krwWithdrawable)}원</div>
+                        </div>
+                    </div>
+                    ` : ''}
                 </div>
             `;
             form.classList.add('d-none');
             unavailable.classList.remove('d-none');
             document.getElementById('deposit-unavailable-msg').textContent = 
-                `KRW 잔고가 부족합니다. (최소 5,000원 필요, 현재: ${formatNumber(krwBalance)}원)`;
+                krwWithdrawable < 5000
+                    ? `KRW 잔고가 부족합니다. (최소 5,000원 필요, 입금 가능: ${formatNumber(krwWithdrawable)}원)`
+                    : `입금 불가 상태입니다. (입금 가능: ${formatNumber(krwWithdrawable)}원)`;
         }
         
     } catch (error) {
@@ -687,6 +753,9 @@ function setDepositPercent(percent) {
     amount = Math.floor(amount / 1000) * 1000;
     
     document.getElementById('deposit-amount').value = amount;
+    
+    // 예상 USDT 업데이트
+    updateDepositEstimate();
 }
 
 function setWithdrawPercent(percent) {
@@ -706,6 +775,68 @@ function setWithdrawPercent(percent) {
     
     // 예상 금액 업데이트
     updateWithdrawEstimate();
+}
+
+// =========================================================================
+// 예상 입금 USDT 계산
+// =========================================================================
+
+function updateDepositEstimate() {
+    const amountInput = document.getElementById('deposit-amount');
+    const estimateDiv = document.getElementById('deposit-estimate');
+    
+    if (!estimateDiv) return;
+    
+    const krwAmount = parseFloat(amountInput.value) || 0;
+    
+    if (krwAmount <= 0 || depositPriceInfo.trxKrwPrice <= 0 || depositPriceInfo.trxUsdtPrice <= 0) {
+        estimateDiv.classList.add('d-none');
+        return;
+    }
+    
+    // 입금 과정 계산:
+    // 1. KRW -> TRX 매수 (Upbit 거래 수수료 0.05%)
+    const krwAfterUpbitFee = krwAmount * (1 - depositPriceInfo.upbitTradeRate);
+    const trxAmount = krwAfterUpbitFee / depositPriceInfo.trxKrwPrice;
+    
+    // 2. TRX 이체 수수료 (1 TRX)
+    const trxAfterNetworkFee = Math.max(0, trxAmount - depositPriceInfo.networkFeeTrx);
+    
+    // 3. TRX -> USDT 환전 (Binance 거래 수수료 0.1%)
+    const estimatedUsdt = trxAfterNetworkFee * depositPriceInfo.trxUsdtPrice * (1 - depositPriceInfo.binanceTradeRate);
+    
+    // 수수료 상세
+    const upbitFeeKrw = krwAmount * depositPriceInfo.upbitTradeRate;
+    const networkFeeKrw = depositPriceInfo.networkFeeTrx * depositPriceInfo.trxKrwPrice;
+    const binanceFeeUsdt = trxAfterNetworkFee * depositPriceInfo.trxUsdtPrice * depositPriceInfo.binanceTradeRate;
+    
+    // UI 업데이트
+    estimateDiv.classList.remove('d-none');
+    estimateDiv.innerHTML = `
+        <div class="estimate-info">
+            <div class="row mb-2">
+                <div class="col-12">
+                    <div class="estimate-label text-success fw-bold">예상 FUTURES USDT 입금액</div>
+                    <div class="estimate-value fs-5 text-success fw-bold">≈ ${formatNumber(estimatedUsdt.toFixed(2))} USDT</div>
+                </div>
+            </div>
+            <hr class="my-2">
+            <div class="row small text-muted">
+                <div class="col-12 mb-1">
+                    <i class="bi bi-info-circle"></i> 수수료 내역
+                </div>
+                <div class="col-6">Upbit TRX 매수 (0.05%)</div>
+                <div class="col-6 text-end">≈ ${formatNumber(Math.floor(upbitFeeKrw))}원</div>
+                <div class="col-6">네트워크 수수료</div>
+                <div class="col-6 text-end">1 TRX (≈ ${formatNumber(Math.floor(networkFeeKrw))}원)</div>
+                <div class="col-6">Binance TRX→USDT (0.1%)</div>
+                <div class="col-6 text-end">≈ ${formatNumber(binanceFeeUsdt.toFixed(4))} USDT</div>
+                <div class="col-12 mt-2">
+                    <i class="bi bi-exclamation-triangle"></i> 실제 금액은 환율 변동에 따라 달라질 수 있습니다.
+                </div>
+            </div>
+        </div>
+    `;
 }
 
 // =========================================================================

@@ -48,7 +48,13 @@
                             <button type="button" class="btn btn-outline-secondary btn-sm" onclick="setDepositPercent(75)">75%</button>
                             <button type="button" class="btn btn-outline-success btn-sm" onclick="setDepositPercent(100)">최대</button>
                         </div>
-                        <div class="form-text">수수료 약 1 TRX (≈ 150원) 발생</div>
+                        <div class="form-text">수수료: TRX 매수(0.05%) + 이체(1 TRX) + TRX→USDT(0.1%)</div>
+                    </div>
+                    <!-- 예상 입금 USDT 표시 영역 -->
+                    <div id="deposit-estimate" class="card bg-light mb-3 d-none">
+                        <div class="card-body py-2 px-3">
+                            <!-- JavaScript에서 동적으로 채워짐 -->
+                        </div>
                     </div>
                     <button type="submit" class="btn btn-success w-100" id="deposit-btn">
                         <i class="bi bi-check-circle"></i> 입금 시작
