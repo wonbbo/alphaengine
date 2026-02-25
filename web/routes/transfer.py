@@ -102,6 +102,7 @@ class WithdrawStatusResponse(BaseModel):
     pending_withdraw: bool
     pending_transfer_id: str | None
     any_pending: bool = False  # 입금/출금 구분 없이 진행 중 이체 존재 시 True
+    upbit_trx_address: str | None = None  # 출금 확인 모달용 (업비트 TRX 입금주소)
     # 예상 출금 계산용 시세 정보
     trx_usdt_price: str | None = None
     trx_krw_price: str | None = None

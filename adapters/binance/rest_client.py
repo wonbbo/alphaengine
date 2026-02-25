@@ -811,6 +811,43 @@ class BinanceRestClient:
                         return (f.get("stepSize", "0.1"), f.get("minQty", "0"))
         return ("0.1", "0")
 
+    async def get_spot_min_notional(self, symbol: str) -> str:
+        """Spot 심볼 최소 노셔널(USDT) 조회 (NOTIONAL / MIN_NOTIONAL 오류 방지)
+
+        exchangeInfo에서 MIN_NOTIONAL 또는 NOTIONAL 필터의 minNotional 반환.
+        시장가 주문에 적용되는 필터만 사용.
+
+        Args:
+            symbol: 심볼 (예: TRXUSDT)
+
+        Returns:
+            minNotional 문자열 (예: "5.0"). 조회 실패 시 "0"
+        """
+        try:
+            data = await self._spot_request(
+                "GET",
+                "/api/v3/exchangeInfo",
+                params={"symbol": symbol},
+            )
+            for s in data.get("symbols", []):
+                if s.get("symbol") != symbol:
+                    continue
+                for f in s.get("filters", []):
+                    ft = f.get("filterType")
+                    if ft == "MIN_NOTIONAL":
+                        if f.get("applyToMarket", True):
+                            return str(f.get("minNotional", "0"))
+                    if ft == "NOTIONAL":
+                        if f.get("applyMinToMarket", True):
+                            return str(f.get("minNotional", "0"))
+            return "0"
+        except Exception as e:
+            logger.warning(
+                f"Spot min notional 조회 실패 (fallback 0): {symbol} - {e}",
+                extra={"symbol": symbol},
+            )
+            return "0"
+
     def _round_down_to_step(self, quantity: str, step_size: str) -> str:
         """수량을 step_size에 맞게 내림 (LOT_SIZE 필터 준수)
         
@@ -1097,10 +1134,13 @@ class BinanceRestClient:
         timeout: float = 600.0,
         poll_interval: float = 30.0,
         since_time_ms: int | None = None,
+        expected_amount_min: float | None = None,
+        expected_amount_max: float | None = None,
     ) -> dict[str, Any] | None:
         """입금 확인 대기
         
         특정 코인의 입금이 확인될 때까지 대기.
+        expected_amount_min/max 지정 시 해당 범위 내 입금만 인정 (다른 이체 건 혼선 방지).
         
         Args:
             coin: 코인 코드
@@ -1108,6 +1148,8 @@ class BinanceRestClient:
             timeout: 최대 대기 시간 (초)
             poll_interval: 폴링 간격 (초)
             since_time_ms: 조회 시작 시각 (밀리초). 미지정 시 24시간 전부터 조회.
+            expected_amount_min: 기대 입금 하한 (미지정 시 min_amount만 사용)
+            expected_amount_max: 기대 입금 상한 (미지정 시 상한 없음)
             
         Returns:
             입금 정보 또는 None (타임아웃)
@@ -1126,19 +1168,23 @@ class BinanceRestClient:
                 start_time=start_time,
             )
             
-            # min_amount 이상인 입금 찾기
             for deposit in deposits:
                 amount = float(deposit.get("amount", 0))
-                if amount >= min_amount:
-                    logger.info(
-                        "입금 확인됨",
-                        extra={
-                            "coin": coin,
-                            "amount": amount,
-                            "txId": deposit.get("txId"),
-                        },
-                    )
-                    return deposit
+                if amount < min_amount:
+                    continue
+                if expected_amount_min is not None and amount < expected_amount_min:
+                    continue
+                if expected_amount_max is not None and amount > expected_amount_max:
+                    continue
+                logger.info(
+                    "입금 확인됨",
+                    extra={
+                        "coin": coin,
+                        "amount": amount,
+                        "txId": deposit.get("txId"),
+                    },
+                )
+                return deposit
             
             await asyncio.sleep(poll_interval)
             elapsed += poll_interval

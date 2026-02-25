@@ -1,16 +1,18 @@
 // AlphaEngine Transfer UI JavaScript
 
 const API_BASE = '/api/transfer';
-let currentTransferId = null;
+let currentTransferId = null;      // 진행 중인 이체 ID (폴링용)
+let detailModalTransferId = null;  // 상세 모달에 표시 중인 이체 ID
 let pollingInterval = null;
 let maxDepositAmount = 0;
 let maxWithdrawAmount = 0;
+let upbitTrxAddress = '';  // 출금 확인 모달용
 
 // 출금 예상 금액 계산용 시세 정보
 let withdrawPriceInfo = {
     trxUsdtPrice: 0,
     trxKrwPrice: 0,
-    networkFeeTrx: 1,
+    networkFeeTrx: 0.062,  // Binance TRX TRC20 출금 수수료
     binanceTradeRate: 0.001,
     upbitTradeRate: 0.0005,
 };
@@ -19,7 +21,7 @@ let withdrawPriceInfo = {
 let depositPriceInfo = {
     trxUsdtPrice: 0,
     trxKrwPrice: 0,
-    networkFeeTrx: 1,
+    networkFeeTrx: 1,  // Upbit TRX 출금 수수료 (deposit flow는 Upbit→Binance)
     binanceTradeRate: 0.001,
     upbitTradeRate: 0.0005,
 };
@@ -234,6 +236,7 @@ async function loadWithdrawStatus() {
                 binanceTradeRate: parseFloat(data.binance_trade_fee_rate || 0.001),
                 upbitTradeRate: parseFloat(data.upbit_trade_fee_rate || 0.0005),
             };
+            upbitTrxAddress = data.upbit_trx_address || '';
             
             // 출금 가능
             statusDiv.innerHTML = `
@@ -336,6 +339,7 @@ document.getElementById('deposit-form')?.addEventListener('submit', async functi
     btn.disabled = true;
     btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> 처리 중...';
     
+    let success = false;
     try {
         const response = await fetch(`${API_BASE}/deposit`, {
             method: 'POST',
@@ -350,17 +354,20 @@ document.getElementById('deposit-form')?.addEventListener('submit', async functi
         
         const data = await response.json();
         currentTransferId = data.transfer_id;
+        success = true;
         
-        // 상태 갱신
-        loadDepositStatus();
+        // 상태 갱신 (입금 진행 중으로 폼 숨김·버튼 비활성화)
+        await loadDepositStatus();
         loadTransferProgress(data.transfer_id);
         startPolling();
         
     } catch (error) {
         alert('입금 요청 실패: ' + error.message);
     } finally {
-        btn.disabled = false;
-        btn.innerHTML = '<i class="bi bi-check-circle"></i> 입금 시작';
+        if (!success) {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-check-circle"></i> 입금 시작';
+        }
     }
 });
 
@@ -377,37 +384,75 @@ document.getElementById('withdraw-form')?.addEventListener('submit', async funct
         return;
     }
     
-    const btn = document.getElementById('withdraw-btn');
-    btn.disabled = true;
-    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> 처리 중...';
+    // 출금 확인 모달 표시 (업비트 TRX 입금주소 확인)
+    const addressInput = document.getElementById('withdraw-confirm-address');
+    const confirmBtn = document.getElementById('withdraw-confirm-btn');
+    if (addressInput) addressInput.value = upbitTrxAddress || '(주소 없음)';
+    if (confirmBtn) confirmBtn.disabled = !upbitTrxAddress;
     
-    try {
-        const response = await fetch(`${API_BASE}/withdraw`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ amount_usdt: amount })
-        });
-        
-        if (!response.ok) {
-            const error = await response.json();
-            throw new Error(error.detail || '출금 요청 실패');
+    const modal = new bootstrap.Modal(document.getElementById('withdrawConfirmModal'));
+    modal.show();
+    
+    // 확인 버튼: 한 번만 실행되도록 기존 리스너 제거 후 재등록
+    const doWithdraw = async () => {
+        const confirmBtnEl = document.getElementById('withdraw-confirm-btn');
+        if (confirmBtnEl) {
+            confirmBtnEl.disabled = true;
+            confirmBtnEl.innerHTML = '<span class="spinner-border spinner-border-sm"></span> 처리 중...';
         }
         
-        const data = await response.json();
-        currentTransferId = data.transfer_id;
+        const withdrawBtn = document.getElementById('withdraw-btn');
+        if (withdrawBtn) withdrawBtn.disabled = true;
         
-        // 상태 갱신
-        loadWithdrawStatus();
-        loadTransferProgress(data.transfer_id);
-        startPolling();
-        
-    } catch (error) {
-        alert('출금 요청 실패: ' + error.message);
-    } finally {
-        btn.disabled = false;
-        btn.innerHTML = '<i class="bi bi-check-circle"></i> 출금 시작';
-    }
+        try {
+            const response = await fetch(`${API_BASE}/withdraw`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ amount_usdt: amount })
+            });
+            
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.detail || '출금 요청 실패');
+            }
+            
+            const data = await response.json();
+            currentTransferId = data.transfer_id;
+            modal.hide();
+            
+            // 상태 갱신 (출금 진행 중으로 폼 숨김·버튼 비활성화)
+            await loadWithdrawStatus();
+            loadTransferProgress(data.transfer_id);
+            startPolling();
+            
+        } catch (error) {
+            alert('출금 요청 실패: ' + error.message);
+            loadWithdrawStatus();  // 폼 상태 갱신
+        } finally {
+            const confirmBtnEl = document.getElementById('withdraw-confirm-btn');
+            if (confirmBtnEl) {
+                confirmBtnEl.disabled = false;
+                confirmBtnEl.innerHTML = '<i class="bi bi-check-circle"></i> 맞습니다. 출금 시작';
+            }
+        }
+    };
+    
+    confirmBtn.replaceWith(confirmBtn.cloneNode(true));
+    document.getElementById('withdraw-confirm-btn').addEventListener('click', doWithdraw);
 });
+
+function copyWithdrawAddress() {
+    const input = document.getElementById('withdraw-confirm-address');
+    if (!input || !input.value) return;
+    navigator.clipboard.writeText(input.value).then(() => {
+        const btn = document.getElementById('copy-withdraw-address-btn');
+        if (btn) {
+            const orig = btn.innerHTML;
+            btn.innerHTML = '<i class="bi bi-check"></i>';
+            setTimeout(() => { btn.innerHTML = orig; }, 1500);
+        }
+    });
+}
 
 // =========================================================================
 // 진행 상태 표시
@@ -454,7 +499,7 @@ async function loadTransferProgress(transferId) {
         
         // 상세 모달이 열려 있고 같은 이체면 내용 동기화 (목록/상세 불일치 방지)
         const detailModal = document.getElementById('detailModal');
-        if (detailModal && detailModal.classList.contains('show') && currentTransferId === transferId) {
+        if (detailModal && detailModal.classList.contains('show') && detailModalTransferId === transferId) {
             renderDetailContent(data);
         }
         
@@ -509,6 +554,9 @@ async function checkPendingTransfers() {
                 `${transfer.transfer_type === 'DEPOSIT' ? '입금' : '출금'}이 진행 중입니다... ` +
                 `(${transfer.current_step}/${transfer.total_steps})`;
             
+            // 입/출금 진행 중이면 양쪽 버튼 비활성화·폼 갱신 (리프레시 없이 반영)
+            loadDepositStatus();
+            loadWithdrawStatus();
             loadTransferProgress(transfer.transfer_id);
             
             if (!pollingInterval) {
@@ -634,9 +682,20 @@ async function showTransferDetail(transferId) {
         const response = await fetch(`${API_BASE}/${transferId}`);
         const data = await response.json();
         
+        // 상세 모달용 ID 설정 (폴링 동기화용)
+        detailModalTransferId = transferId;
+        
         renderDetailContent(data);
         
-        const modal = new bootstrap.Modal(document.getElementById('detailModal'));
+        const modalEl = document.getElementById('detailModal');
+        const modal = new bootstrap.Modal(modalEl);
+        
+        // 모달 닫힐 때 detailModalTransferId 초기화
+        modalEl.addEventListener('hidden.bs.modal', function handler() {
+            detailModalTransferId = null;
+            modalEl.removeEventListener('hidden.bs.modal', handler);
+        });
+        
         modal.show();
         
     } catch (error) {
@@ -646,6 +705,7 @@ async function showTransferDetail(transferId) {
 }
 
 function viewTransferDetail() {
+    // 진행 중인 이체의 상세 보기 (진행 상태 섹션에서 호출)
     if (currentTransferId) {
         showTransferDetail(currentTransferId);
     }
@@ -857,7 +917,7 @@ function updateDepositEstimate() {
                 <div class="col-6">Upbit TRX 매수 (0.05%)</div>
                 <div class="col-6 text-end">≈ ${formatNumber(Math.floor(upbitFeeKrw))}원</div>
                 <div class="col-6">네트워크 수수료</div>
-                <div class="col-6 text-end">1 TRX (≈ ${formatNumber(Math.floor(networkFeeKrw))}원)</div>
+                <div class="col-6 text-end">${depositPriceInfo.networkFeeTrx} TRX (≈ ${formatNumber(Math.floor(networkFeeKrw))}원)</div>
                 <div class="col-6">Binance TRX→USDT (0.1%)</div>
                 <div class="col-6 text-end">≈ ${formatNumber(binanceFeeUsdt.toFixed(4))} USDT</div>
                 <div class="col-12 mt-2">
@@ -890,7 +950,7 @@ function updateWithdrawEstimate() {
     const usdtAfterFee = usdtAmount * (1 - withdrawPriceInfo.binanceTradeRate);
     const trxAmount = usdtAfterFee / withdrawPriceInfo.trxUsdtPrice;
     
-    // 2. TRX 출금 수수료 (1 TRX)
+    // 2. TRX 출금 수수료 (TRC20)
     const trxAfterNetworkFee = Math.max(0, trxAmount - withdrawPriceInfo.networkFeeTrx);
     
     // 3. TRX -> KRW 환전 (Upbit 거래 수수료 0.05%)
@@ -922,7 +982,7 @@ function updateWithdrawEstimate() {
                 <div class="col-6">Binance 거래 (0.1%)</div>
                 <div class="col-6 text-end">≈ ${formatNumber(binanceFeeUsdt.toFixed(4))} USDT</div>
                 <div class="col-6">네트워크 수수료</div>
-                <div class="col-6 text-end">1 TRX (≈ ${formatNumber(Math.floor(networkFeeKrw))}원)</div>
+                <div class="col-6 text-end">${withdrawPriceInfo.networkFeeTrx} TRX (≈ ${formatNumber(Math.floor(networkFeeKrw))}원)</div>
                 <div class="col-6">Upbit 거래 (0.05%)</div>
                 <div class="col-6 text-end">≈ ${formatNumber(Math.floor(upbitFeeKrw))}원</div>
                 <div class="col-6 fw-bold">총 예상 수수료</div>

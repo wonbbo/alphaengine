@@ -110,7 +110,46 @@ class TransferManager:
                 
                 for transfer in pending_transfers:
                     try:
-                        await self._resume_transfer(transfer)
+                        logger.info(
+                            f"[Monitor] 이체 재개: {transfer.transfer_id} | "
+                            f"type={transfer.transfer_type.value} status={transfer.status.value} "
+                            f"current_step={transfer.current_step}/{transfer.total_steps} "
+                            f"requested_amount={transfer.requested_amount}",
+                            extra={
+                                "transfer_id": transfer.transfer_id,
+                                "transfer_type": transfer.transfer_type.value,
+                                "status": transfer.status.value,
+                                "current_step": transfer.current_step,
+                                "total_steps": transfer.total_steps,
+                            },
+                        )
+                        result = await self._resume_transfer(transfer)
+                        if result:
+                            logger.info(
+                                f"[Monitor] 이체 처리 완료: {result.transfer_id} | "
+                                f"status={result.status.value} actual_amount={result.actual_amount}",
+                                extra={
+                                    "transfer_id": result.transfer_id,
+                                    "status": result.status.value,
+                                },
+                            )
+                            if result.status == TransferStatus.COMPLETED:
+                                if result.transfer_type == TransferType.DEPOSIT:
+                                    await self._record_event(
+                                        EventTypes.DEPOSIT_COMPLETED,
+                                        {
+                                            "transfer_id": result.transfer_id,
+                                            "actual_amount": str(result.actual_amount or ""),
+                                        },
+                                    )
+                                else:
+                                    await self._record_event(
+                                        EventTypes.WITHDRAW_COMPLETED,
+                                        {
+                                            "transfer_id": result.transfer_id,
+                                            "actual_amount": str(result.actual_amount or ""),
+                                        },
+                                    )
                     except Exception as e:
                         logger.error(
                             f"Transfer resume failed: {transfer.transfer_id}",
@@ -123,12 +162,11 @@ class TransferManager:
             # 30초마다 체크
             await asyncio.sleep(30)
     
-    async def _resume_transfer(self, transfer: Transfer) -> None:
-        """중단된 이체 재개"""
+    async def _resume_transfer(self, transfer: Transfer) -> Transfer:
+        """중단된 이체 재개 (Bot 단일 실행 주체)"""
         if transfer.transfer_type == TransferType.DEPOSIT:
-            await self.deposit_handler.execute(transfer)
-        else:
-            await self.withdraw_handler.execute(transfer)
+            return await self.deposit_handler.execute(transfer)
+        return await self.withdraw_handler.execute(transfer)
     
     # =========================================================================
     # 입금
@@ -207,31 +245,17 @@ class TransferManager:
         )
         
         logger.info(
-            f"Deposit requested: {transfer.transfer_id}",
-            extra={"amount": str(amount_krw)},
+            f"Deposit requested: {transfer.transfer_id} | amount_krw={amount_krw} requested_by={requested_by} | "
+            "실행은 Bot 모니터가 담당(최대 30초 내 처리 시작)",
+            extra={
+                "transfer_id": transfer.transfer_id,
+                "amount_krw": str(amount_krw),
+                "requested_by": requested_by,
+            },
         )
         
-        # 비동기로 입금 실행 시작
-        asyncio.create_task(self._execute_deposit(transfer))
-        
+        # 실행은 Bot 모니터만 수행 (이중 실행·상태 덮어쓰기 방지)
         return transfer
-    
-    async def _execute_deposit(self, transfer: Transfer) -> None:
-        """입금 실행 (백그라운드)"""
-        try:
-            result = await self.deposit_handler.execute(transfer)
-            
-            if result.status == TransferStatus.COMPLETED:
-                await self._record_event(
-                    EventTypes.DEPOSIT_COMPLETED,
-                    {
-                        "transfer_id": result.transfer_id,
-                        "actual_amount": str(result.actual_amount),
-                    },
-                )
-            
-        except Exception as e:
-            logger.error(f"Deposit execution failed: {e}", exc_info=True)
     
     # =========================================================================
     # 출금
@@ -301,31 +325,17 @@ class TransferManager:
         )
         
         logger.info(
-            f"Withdraw requested: {transfer.transfer_id}",
-            extra={"amount": str(amount_usdt)},
+            f"Withdraw requested: {transfer.transfer_id} | amount_usdt={amount_usdt} requested_by={requested_by} | "
+            "실행은 Bot 모니터가 담당(최대 30초 내 처리 시작)",
+            extra={
+                "transfer_id": transfer.transfer_id,
+                "amount_usdt": str(amount_usdt),
+                "requested_by": requested_by,
+            },
         )
         
-        # 비동기로 출금 실행 시작
-        asyncio.create_task(self._execute_withdraw(transfer))
-        
+        # 실행은 Bot 모니터만 수행 (이중 실행·상태 덮어쓰기 방지)
         return transfer
-    
-    async def _execute_withdraw(self, transfer: Transfer) -> None:
-        """출금 실행 (백그라운드)"""
-        try:
-            result = await self.withdraw_handler.execute(transfer)
-            
-            if result.status == TransferStatus.COMPLETED:
-                await self._record_event(
-                    EventTypes.WITHDRAW_COMPLETED,
-                    {
-                        "transfer_id": result.transfer_id,
-                        "actual_amount": str(result.actual_amount),
-                    },
-                )
-            
-        except Exception as e:
-            logger.error(f"Withdraw execution failed: {e}", exc_info=True)
     
     # =========================================================================
     # 조회
@@ -425,7 +435,7 @@ class TransferManager:
                 f"재시도할 수 없는 상태입니다: {transfer.status.value}"
             )
         
-        # PENDING으로 변경하여 재시도
+        # PENDING으로 변경 → Bot 모니터가 재개 (실행 주체 단일화)
         await self.repository.update_status(
             transfer_id,
             TransferStatus.PENDING,
@@ -433,14 +443,11 @@ class TransferManager:
         )
         
         transfer = await self.repository.get(transfer_id)
-        
-        # 재시도 실행
-        if transfer.transfer_type == TransferType.DEPOSIT:
-            asyncio.create_task(self._execute_deposit(transfer))
-        else:
-            asyncio.create_task(self._execute_withdraw(transfer))
-        
-        logger.info(f"Transfer retry started: {transfer_id}")
+        logger.info(
+            f"Transfer retry queued: {transfer_id} | type={transfer.transfer_type.value} "
+            "Bot 모니터가 최대 30초 내 재개",
+            extra={"transfer_id": transfer_id},
+        )
         
         return transfer
     

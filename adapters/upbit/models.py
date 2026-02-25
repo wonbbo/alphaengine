@@ -124,7 +124,10 @@ class UpbitOrder:
     
     @classmethod
     def from_api(cls, data: dict[str, Any]) -> "UpbitOrder":
-        """API 응답에서 생성"""
+        """API 응답에서 생성
+
+        executed_funds가 없거나 0이면 trades 배열의 funds 합으로 계산 (Upbit API 응답 구조 대응)
+        """
         price = data.get("price")
         if price is not None:
             price = Decimal(str(price))
@@ -134,6 +137,16 @@ class UpbitOrder:
             created_at = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
         else:
             created_at = datetime.now()
+
+        # 체결 금액: 최상위 executed_funds 우선, 없거나 0이면 trades[].funds 합산
+        executed_funds_raw = data.get("executed_funds", "0")
+        executed_funds = Decimal(str(executed_funds_raw or "0"))
+        if executed_funds <= Decimal("0"):
+            trades = data.get("trades")
+            if isinstance(trades, list) and trades:
+                executed_funds = sum(
+                    Decimal(str(t.get("funds", 0) or 0)) for t in trades
+                )
             
         return cls(
             uuid=data["uuid"],
@@ -145,7 +158,7 @@ class UpbitOrder:
             volume=Decimal(str(data.get("volume", "0"))),
             remaining_volume=Decimal(str(data.get("remaining_volume", "0"))),
             executed_volume=Decimal(str(data.get("executed_volume", "0"))),
-            executed_funds=Decimal(str(data.get("executed_funds", "0"))),
+            executed_funds=executed_funds,
             paid_fee=Decimal(str(data.get("paid_fee", "0"))),
             trades_count=int(data.get("trades_count", 0)),
             created_at=created_at,

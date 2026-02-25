@@ -202,6 +202,44 @@
     </div>
 </div>
 
+<!-- 출금 주소 확인 모달 -->
+<div class="modal fade" id="withdrawConfirmModal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content border-warning">
+            <div class="modal-header bg-warning text-dark">
+                <h5 class="modal-title fw-bold">
+                    <i class="bi bi-exclamation-triangle-fill"></i> 출금 전 필수 확인
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="닫기"></button>
+            </div>
+            <div class="modal-body">
+                <div class="alert alert-danger mb-3 mb-0">
+                    <strong>업비트 TRX의 입금주소가 맞는지 확인하세요.</strong>
+                    <p class="mb-0 mt-2 small">입금주소가 변경된 경우 고객센터를 통해야 돌려받을 수 있습니다.</p>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label fw-bold">업비트 TRX 입금주소 (trx_deposit_address)</label>
+                    <div class="input-group">
+                        <input type="text" class="form-control font-monospace" id="withdraw-confirm-address" readonly>
+                        <button type="button" class="btn btn-outline-secondary" id="copy-withdraw-address-btn" onclick="copyWithdrawAddress()" title="복사">
+                            <i class="bi bi-clipboard"></i>
+                        </button>
+                    </div>
+                </div>
+                <p class="text-muted small mb-0">
+                    <i class="bi bi-info-circle"></i> 업비트 앱/웹에서 TRX 입금 주소를 확인해주세요.
+                </p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">취소</button>
+                <button type="button" class="btn btn-danger" id="withdraw-confirm-btn">
+                    <i class="bi bi-check-circle"></i> 맞습니다. 출금 시작
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- 상세 모달 -->
 <div class="modal fade" id="detailModal" tabindex="-1">
     <div class="modal-dialog">
