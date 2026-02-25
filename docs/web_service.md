@@ -33,6 +33,10 @@ sudo systemctl status alphaengine-web
 sudo journalctl -u alphaengine-bot -f
 sudo journalctl -u alphaengine-web -f
 
+# 입출금 로그: Web 프로세스에서 실행되므로 web 로그 확인
+tail -f logs/web/web.log
+tail -f logs/bot/bot.log  # Bot은 거래/이벤트 처리용
+
 # Nginx 로그
 sudo tail -f /var/log/nginx/alphaengine_access.log
 sudo tail -f /var/log/nginx/alphaengine_error.log

@@ -16,6 +16,9 @@ from core.types import TransferStatus, TransferType
 
 logger = logging.getLogger(__name__)
 
+# update_status에서 error_message 미갱신 구분용 (None은 DB 초기화)
+_ERROR_NOT_SET = object()
+
 
 @dataclass
 class Transfer:
@@ -199,7 +202,7 @@ class TransferRepository:
         transfer_id: str,
         status: TransferStatus,
         current_step: int | None = None,
-        error_message: str | None = None,
+        error_message: str | None = _ERROR_NOT_SET,
     ) -> bool:
         """상태 업데이트
         
@@ -207,7 +210,7 @@ class TransferRepository:
             transfer_id: 이체 ID
             status: 새 상태
             current_step: 현재 단계
-            error_message: 에러 메시지
+            error_message: 에러 메시지 (None이면 DB에서 초기화, 생략 시 미갱신)
             
         Returns:
             성공 여부
@@ -221,7 +224,7 @@ class TransferRepository:
             update_parts.append("current_step = ?")
             params.append(current_step)
         
-        if error_message is not None:
+        if error_message is not _ERROR_NOT_SET:
             update_parts.append("error_message = ?")
             params.append(error_message)
         

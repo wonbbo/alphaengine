@@ -22,6 +22,7 @@ from strategies.base import (
 
 logger = logging.getLogger(__name__)
 
+MAX_OHLCV_COUNT = 432
 
 class ContextBuilder:
     """Context Builder
@@ -197,7 +198,7 @@ class ContextBuilder:
             ohlcv = await market_data_provider.get_ohlcv(
                 symbol=self.scope.symbol,
                 timeframe="5m",
-                limit=100,
+                limit=MAX_OHLCV_COUNT,
             )
             return ohlcv
             
@@ -214,7 +215,7 @@ class ContextBuilder:
             bars_data = await market_data_provider.get_bars(
                 symbol=self.scope.symbol,
                 timeframe="5m",
-                limit=100,
+                limit=MAX_OHLCV_COUNT,
             )
             
             bars = []

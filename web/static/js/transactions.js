@@ -5,7 +5,6 @@
 let currentSymbol = null;
 let currentLimit = 50;
 let currentOffset = 0;
-let displaySymbol = null;
 
 document.addEventListener('DOMContentLoaded', () => {
     initTransactions();
@@ -20,7 +19,7 @@ async function loadTransactions() {
     const tbody = document.getElementById('transactions-table');
     if (!tbody) return;
     
-    tbody.innerHTML = '<tr><td colspan="5" class="text-center"><div class="spinner-border spinner-border-sm"></div> 로딩 중...</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="6" class="text-center"><div class="spinner-border spinner-border-sm"></div> 로딩 중...</td></tr>';
     
     try {
         const params = {
@@ -35,15 +34,9 @@ async function loadTransactions() {
         const data = await AE.api(`/api/transactions${queryString}`);
         
         if (!data.transactions || data.transactions.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">거래 내역 없음</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">거래 내역 없음</td></tr>';
             updatePaginationInfo(0, currentLimit, currentOffset);
             return;
-        }
-        
-        // 첫 번째 거래의 심볼을 타이틀에 표시
-        if (data.transactions.length > 0 && data.transactions[0].symbol) {
-            displaySymbol = data.transactions[0].symbol;
-            updateSymbolTitle();
         }
         
         tbody.innerHTML = data.transactions.map(tx => {
@@ -52,6 +45,7 @@ async function loadTransactions() {
             
             return `
                 <tr>
+                    <td><code>${tx.symbol || '-'}</code></td>
                     <td>${timeStr}</td>
                     <td class="text-end">${AE.formatQuantity(tx.bought_qty)}</td>
                     <td class="text-end">${AE.formatQuantity(tx.sold_qty)}</td>
@@ -66,18 +60,7 @@ async function loadTransactions() {
         
     } catch (error) {
         console.error('Load transactions error:', error);
-        tbody.innerHTML = '<tr><td colspan="5" class="text-center text-danger">로드 실패</td></tr>';
-    }
-}
-
-function updateSymbolTitle() {
-    const symbolTitle = document.getElementById('symbol-title');
-    if (!symbolTitle) return;
-    
-    if (displaySymbol) {
-        symbolTitle.textContent = `(${displaySymbol})`;
-    } else {
-        symbolTitle.textContent = '';
+        tbody.innerHTML = '<tr><td colspan="6" class="text-center text-danger">로드 실패</td></tr>';
     }
 }
 

@@ -12,12 +12,14 @@ Dev-Phase 5: 코어 로직 통합
 - Strategy Runner
 """
 
+import sys
 import asyncio
 import logging
-import sys
-from datetime import datetime, timezone
-from typing import Any
+
+from decimal import Decimal
 from uuid import uuid4
+from typing import Any
+from datetime import datetime, timezone
 
 from adapters.binance.rest_client import BinanceRestClient
 from adapters.db.sqlite_adapter import SQLiteAdapter, init_schema
@@ -29,7 +31,7 @@ from core.logging import setup_logging
 from core.storage.command_store import CommandStore
 from core.storage.event_store import EventStore
 from core.storage.config_store import ConfigStore, init_default_configs
-from core.types import Scope, WebSocketState
+from core.types import Scope, TradingMode, WebSocketState
 
 from bot.websocket.listener import WebSocketListener
 from bot.reconciler.reconciler import HybridReconciler
@@ -274,6 +276,11 @@ class BotEngine:
         
         if not config["binance_trx_address"]:
             logger.info("Binance TRX 주소가 없어 입출금 기능 비활성화")
+            return None
+        
+        # Testnet 모드에서는 입출금 불가 (Upbit은 실거래소만 지원, Binance Testnet과 연동 불가)
+        if self.settings.mode == TradingMode.TESTNET:
+            logger.info("Testnet 모드, 입출금 기능 비활성화")
             return None
         
         try:
@@ -749,7 +756,7 @@ class BotEngine:
             return not await self.initial_capital_recorder.is_initialized()
         return False
     
-    async def _get_ledger_balances_for_reconciliation(self) -> dict[str, dict[str, "Decimal"]]:
+    async def _get_ledger_balances_for_reconciliation(self) -> dict[str, dict[str, Decimal]]:
         """Opening Balance 정합용 Ledger 잔고 조회
         
         Projector의 Ledger 잔고를 조회하여 OpeningBalanceReconciler에 전달할 형식으로 변환.
@@ -760,8 +767,6 @@ class BotEngine:
                 "SPOT": {"USDT": Decimal("0.47"), "BNB": Decimal("0.5")},
             }
         """
-        from decimal import Decimal
-        
         result: dict[str, dict[str, Decimal]] = {
             "FUTURES": {},
             "SPOT": {},
@@ -784,13 +789,15 @@ class BotEngine:
                 # ASSET:BINANCE_FUTURES:* 형식 파싱
                 if account_id.startswith("ASSET:BINANCE_FUTURES:"):
                     asset = account_id.replace("ASSET:BINANCE_FUTURES:", "")
-                    if balance > 0:
+                    # 음수 잔고도 포함 (정합 대상이 되어야 함)
+                    if balance != 0:
                         result["FUTURES"][asset] = balance
                 
                 # ASSET:BINANCE_SPOT:* 형식 파싱
                 elif account_id.startswith("ASSET:BINANCE_SPOT:"):
                     asset = account_id.replace("ASSET:BINANCE_SPOT:", "")
-                    if balance > 0:
+                    # 음수 잔고도 포함 (정합 대상이 되어야 함)
+                    if balance != 0:
                         result["SPOT"][asset] = balance
             
             logger.debug(f"Ledger 잔고 조회 완료: FUTURES={result['FUTURES']}, SPOT={result['SPOT']}")

@@ -150,7 +150,9 @@ class UpbitRestClient:
                 error_msg = error_data.get("error", {}).get("message", response.text)
                 error_code = error_data.get("error", {}).get("name")
                 logger.error(
-                    f"Upbit API error: {response.status_code} - {error_msg}",
+                    f"Upbit API error: {response.status_code} - {error_msg} | "
+                    f"endpoint={endpoint} error_code={error_code} "
+                    f"full_response={error_data}",
                     extra={"endpoint": endpoint, "error_code": error_code},
                 )
                 raise UpbitApiError(error_msg, error_code)
@@ -360,6 +362,14 @@ class UpbitRestClient:
                 return order
 
             if order.is_cancelled:
+                # Upbit 시장가 매수: 체결 후 소수점 잔량 반환 시 cancel 처리됨 (실제 체결됨)
+                # executed_volume > 0 이면 체결된 것으로 간주
+                if order.executed_volume > Decimal("0"):
+                    logger.info(
+                        f"Order {order_id} cancelled with partial fill, "
+                        f"executed_volume={order.executed_volume} (Upbit 시장가 매수 잔량 반환)"
+                    )
+                    return order
                 raise UpbitApiError(
                     f"Order {order_id} was cancelled",
                     error_code="ORDER_CANCELLED",
@@ -393,29 +403,148 @@ class UpbitRestClient:
             params={"currency": currency},
         )
 
+    async def get_withdraw_coin_addresses(self) -> list[dict[str, Any]]:
+        """출금 허용 주소 목록 조회 (전체)
+
+        Upbit API: /withdraws/coin_addresses
+        net_type 등 출금 시 필요한 정보 포함.
+
+        Returns:
+            등록된 출금 주소 목록 (currency, net_type, withdraw_address 등)
+        """
+        return await self._request("GET", "/withdraws/coin_addresses")
+
+    def _extract_address_item(
+        self, item: dict[str, Any]
+    ) -> tuple[str | None, str | None]:
+        """주소 항목에서 withdraw_address, net_type 추출 (API 응답 형식 차이 대응)"""
+        waddr = item.get("withdraw_address") or item.get("address")
+        net = item.get("net_type")
+        return (str(waddr) if waddr else None, str(net) if net else None)
+
+    async def resolve_net_type(
+        self, currency: str, address: str
+    ) -> str | None:
+        """출금 주소에 해당하는 net_type 조회
+
+        출금 허용 주소 목록에서 address로 net_type을 찾음.
+        등록되지 않은 주소면 None 반환.
+
+        Args:
+            currency: 자산 코드 (예: TRX)
+            address: 출금 주소
+
+        Returns:
+            net_type 또는 None (미등록 주소)
+        """
+        addr_lower = address.strip().lower()
+        addresses: list[dict[str, Any]] = []
+
+        # 1) /withdraws/coin_addresses 시도
+        try:
+            addresses = await self.get_withdraw_coin_addresses()
+            logger.info(
+                f"[Upbit 출금] coin_addresses 조회 성공, {len(addresses)}개 주소"
+            )
+        except Exception as e:
+            logger.warning(
+                f"[Upbit 출금] coin_addresses 조회 실패: {e}, "
+                f"coin/addresses fallback 시도"
+            )
+            try:
+                addresses = await self.get_withdraw_addresses(currency)
+                logger.info(
+                    f"[Upbit 출금] coin/addresses 조회 성공, {len(addresses)}개 주소"
+                )
+            except Exception as e2:
+                logger.warning(
+                    f"[Upbit 출금] coin/addresses 조회도 실패: {e2}"
+                )
+                return None
+
+        # TRX 주소만 로깅 (디버깅용, 주소 마스킹)
+        trx_items = [a for a in addresses if a.get("currency") == currency]
+        for i, item in enumerate(trx_items[:5]):  # 최대 5개
+            waddr, net = self._extract_address_item(item)
+            mask = f"{waddr[:8]}...{waddr[-4:]}" if waddr and len(waddr) > 12 else "***"
+            logger.info(
+                f"[Upbit 출금] {currency} 주소[{i}] net_type={net} addr={mask}"
+            )
+
+        for item in addresses:
+            if item.get("currency") != currency:
+                continue
+            waddr, net = self._extract_address_item(item)
+            if waddr and waddr.strip().lower() == addr_lower and net:
+                logger.info(
+                    f"[Upbit 출금] net_type 조회 성공: {net} (주소 매칭)"
+                )
+                return net
+
+        logger.warning(
+            f"[Upbit 출금] net_type 미조회 - 주소 미등록 또는 불일치 "
+            f"(currency={currency}, addr_len={len(address)})"
+        )
+        return None
+
     async def withdraw_coin(
         self,
         currency: str,
         amount: Decimal,
         address: str,
+        net_type: str | None = None,
         secondary_address: str | None = None,
         transaction_type: str = "default",
     ) -> UpbitWithdraw:
         """코인 출금 요청
 
+        Upbit API(2023-05-22~) 필수: net_type. 출금 허용 주소 목록 조회 API에서 확인 가능.
+
         Args:
             currency: 자산 코드 (예: TRX)
             amount: 출금 수량
-            address: 출금 주소
+            address: 출금 주소 (출금 허용 주소로 등록된 주소만 가능)
+            net_type: 블록체인 네트워크 식별자. 미지정 시 출금 허용 주소 API에서 조회
             secondary_address: 보조 주소 (태그, 메모 등)
             transaction_type: 출금 유형 (default, internal)
 
         Returns:
             출금 정보
         """
+        if net_type is None:
+            resolved = await self.resolve_net_type(currency, address)
+            if resolved is not None:
+                net_type = resolved
+            else:
+                # TRX: Upbit에서 TRC20(트론 네트워크) 사용. API 조회 실패 시 TRC20 시도
+                if currency == "TRX":
+                    net_type = "TRC20"
+                    logger.info(
+                        "[Upbit 출금] net_type 조회 실패, TRX→TRC20 fallback"
+                    )
+                else:
+                    net_type = currency
+                    logger.warning(
+                        f"[Upbit 출금] net_type 조회 실패, currency 사용: {currency}"
+                    )
+
+        # Upbit 출금: 소수점 6자리 제한 (withdraw_decimal_places_exceeded 방지)
+        amount_rounded = amount.quantize(Decimal("0.000001"))
+        amount_str = str(amount_rounded)
+
+        # 요청 로깅 (주소 마스킹)
+        addr_mask = (
+            f"{address[:8]}...{address[-4:]}" if len(address) > 12 else "***"
+        )
+        logger.info(
+            f"[Upbit 출금] 요청: currency={currency} net_type={net_type} "
+            f"amount={amount_str} address={addr_mask} transaction_type={transaction_type}"
+        )
+
         body: dict[str, Any] = {
             "currency": currency,
-            "amount": str(amount),
+            "net_type": net_type,
+            "amount": amount_str,
             "address": address,
             "transaction_type": transaction_type,
         }
@@ -423,7 +552,15 @@ class UpbitRestClient:
         if secondary_address:
             body["secondary_address"] = secondary_address
 
-        data = await self._request("POST", "/withdraws/coin", body=body)
+        try:
+            data = await self._request("POST", "/withdraws/coin", body=body)
+        except UpbitApiError as e:
+            logger.error(
+                f"[Upbit 출금] 실패: {e} | "
+                f"body_keys={list(body.keys())} amount={body.get('amount')} "
+                f"net_type={body.get('net_type')}"
+            )
+            raise
         return UpbitWithdraw.from_api(data)
 
     async def get_withdraw(self, withdraw_id: str) -> UpbitWithdraw:

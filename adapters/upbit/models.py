@@ -87,6 +87,8 @@ class UpbitOrder:
         volume: 주문 수량
         remaining_volume: 미체결 수량
         executed_volume: 체결 수량
+        executed_funds: 총 체결 금액 (KRW 시장에서 체결된 원화 금액)
+        paid_fee: 사용된 수수료 (원화)
         trades_count: 체결 횟수
         created_at: 주문 생성 시각
     """
@@ -100,6 +102,8 @@ class UpbitOrder:
     volume: Decimal
     remaining_volume: Decimal
     executed_volume: Decimal
+    executed_funds: Decimal
+    paid_fee: Decimal
     trades_count: int
     created_at: datetime
     
@@ -141,6 +145,8 @@ class UpbitOrder:
             volume=Decimal(str(data.get("volume", "0"))),
             remaining_volume=Decimal(str(data.get("remaining_volume", "0"))),
             executed_volume=Decimal(str(data.get("executed_volume", "0"))),
+            executed_funds=Decimal(str(data.get("executed_funds", "0"))),
+            paid_fee=Decimal(str(data.get("paid_fee", "0"))),
             trades_count=int(data.get("trades_count", 0)),
             created_at=created_at,
         )

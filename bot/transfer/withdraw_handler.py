@@ -14,13 +14,16 @@ Binance Futures USDT -> Upbit KRW 출금 흐름 처리.
 
 import asyncio
 import logging
-from decimal import Decimal
+from decimal import Decimal, ROUND_DOWN
 from typing import Any
 
+from adapters.binance.rate_limiter import BinanceApiError
 from adapters.binance.rest_client import BinanceRestClient
 from adapters.upbit.rest_client import UpbitRestClient
 from bot.transfer.repository import Transfer, TransferRepository
-from core.types import TransferStatus
+from core.domain.events import Event, EventTypes
+from core.storage.event_store import EventStore
+from core.types import Scope, TransferStatus
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +38,8 @@ class WithdrawHandler:
         binance: Binance REST 클라이언트
         repository: Transfer 저장소
         upbit_trx_address: Upbit TRX 입금 주소
+        event_store: 이벤트 저장소 (Ledger 기록용)
+        scope: 거래 범위
     """
     
     TOTAL_STEPS = 7
@@ -45,11 +50,15 @@ class WithdrawHandler:
         binance: BinanceRestClient,
         repository: TransferRepository,
         upbit_trx_address: str,
+        event_store: EventStore | None = None,
+        scope: Scope | None = None,
     ):
         self.upbit = upbit
         self.binance = binance
         self.repository = repository
         self.upbit_trx_address = upbit_trx_address
+        self.event_store = event_store
+        self.scope = scope
     
     async def execute(self, transfer: Transfer) -> Transfer:
         """출금 실행
@@ -90,10 +99,23 @@ class WithdrawHandler:
                 extra={"error": str(e), "step": transfer.current_step},
                 exc_info=True,
             )
+            # 에러 유형별 친절한 메시지
+            error_message = str(e)
+            if isinstance(e, TimeoutError):
+                error_message = (
+                    f"{e} TRON 네트워크 지연으로 인한 타임아웃입니다. "
+                    "이체가 완료되었을 수 있으니 잠시 후 재시도하세요."
+                )
+            elif isinstance(e, BinanceApiError) and e.code == -4026:
+                error_message = (
+                    "Binance 잔고 부족: 출금 가능 TRX가 부족합니다. "
+                    "TRX 매수 후 24시간 출금 제한, 수수료 변동, 또는 잔고 정산 지연일 수 있습니다. "
+                    "잠시 후 재시도하세요."
+                )
             await self.repository.update_status(
                 transfer.transfer_id,
                 TransferStatus.FAILED,
-                error_message=str(e),
+                error_message=error_message,
             )
             return await self.repository.get(transfer.transfer_id)  # type: ignore
     
@@ -117,6 +139,16 @@ class WithdrawHandler:
             amount=usdt_amount,
             from_account="FUTURES",
             to_account="SPOT",
+        )
+        
+        # 내부 이체 이벤트 기록 (FUTURES -> SPOT)
+        await self._record_internal_transfer_event(
+            transfer_id=transfer.transfer_id,
+            asset="USDT",
+            amount=Decimal(usdt_amount),
+            from_venue="FUTURES",
+            to_venue="SPOT",
+            tran_id=str(result.get("tranId")),
         )
         
         await self.repository.update_status(
@@ -160,6 +192,28 @@ class WithdrawHandler:
             binance_order_id=str(order.get("orderId")),
         )
         
+        # SPOT 거래 이벤트 기록 (USDT 소비 -> TRX 수령)
+        trx_qty = Decimal(str(order.get("executedQty", "0")))
+        quote_qty = Decimal(str(order.get("cummulativeQuoteQty", "0")))
+        avg_price = quote_qty / trx_qty if trx_qty > 0 else Decimal("0")
+        commission = Decimal("0")
+        commission_asset = "TRX"
+        for fill in order.get("fills", []):
+            commission += Decimal(str(fill.get("commission", "0")))
+            commission_asset = fill.get("commissionAsset", "TRX")
+        
+        await self._record_spot_trade_event(
+            transfer_id=transfer.transfer_id,
+            side="BUY",
+            symbol="TRXUSDT",
+            qty=trx_qty,
+            price=avg_price,
+            quote_qty=quote_qty,
+            commission=commission,
+            commission_asset=commission_asset,
+            order_id=str(order.get("orderId")),
+        )
+        
         await self.repository.update_status(
             transfer.transfer_id,
             TransferStatus.PURCHASING,
@@ -185,20 +239,57 @@ class WithdrawHandler:
         
         # TRX 잔고 확인
         trx_balance = await self.binance.get_spot_balance("TRX")
-        trx_amount = trx_balance.get("free", "0")
+        trx_amount = Decimal(trx_balance.get("free", "0"))
         
-        if float(trx_amount) <= 1:  # 수수료 고려
-            raise ValueError(f"Insufficient TRX balance: {trx_amount}")
+        # Binance 출금 수수료 동적 조회 (API 실패 시 1 TRX fallback)
+        withdraw_fee = Decimal("1")
+        asset_detail = await self.binance.get_asset_detail("TRX")
+        if asset_detail is not None:
+            fee_val = asset_detail.get("withdrawFee")
+            if fee_val is not None:
+                withdraw_fee = Decimal(str(fee_val))
+                logger.debug(
+                    f"[Withdraw Step 3] Binance TRX 출금 수수료: {withdraw_fee} TRX"
+                )
         
-        # Binance TRX 출금 수수료 (약 1 TRX)
-        # 실제 출금 금액 = 잔고 - 수수료
-        withdraw_amount = str(float(trx_amount) - 1)
+        # 안전 마진: 수수료 변동·라운딩 오차 대비 (0.1 TRX)
+        safety_margin = Decimal("0.1")
+        min_required = withdraw_fee + safety_margin
+        
+        if trx_amount <= min_required:
+            # 복구: 이전 시도로 이미 Upbit에 TRX가 도착했을 수 있음 (재시도 시)
+            upbit_trx = await self.upbit.get_account("TRX")
+            if upbit_trx and upbit_trx.balance > Decimal("1"):
+                logger.info(
+                    "[Withdraw Step 3] Binance TRX 부족 but Upbit에 이미 도착 (복구)"
+                )
+                await self.repository.update_status(
+                    transfer.transfer_id,
+                    TransferStatus.CONFIRMING,
+                    current_step=4,
+                )
+                return await self.repository.get(transfer.transfer_id)  # type: ignore
+            raise ValueError(
+                f"Binance TRX 잔고 부족: {trx_amount} TRX "
+                f"(수수료 {withdraw_fee} + 마진 {safety_margin} 필요)"
+            )
+        
+        # 실제 출금 금액 = 잔고 - 수수료 - 안전 마진, 소수점 6자리로 내림
+        withdraw_amount = (trx_amount - withdraw_fee - safety_margin).quantize(
+            Decimal("0.000001"), rounding=ROUND_DOWN
+        )
+        
+        if withdraw_amount <= Decimal("0"):
+            raise ValueError(
+                f"출금 가능 금액 없음: 잔고 {trx_amount} TRX, "
+                f"수수료 {withdraw_fee} + 마진 {safety_margin}"
+            )
         
         # Upbit으로 출금
         result = await self.binance.withdraw_coin(
             coin="TRX",
             address=self.upbit_trx_address,
-            amount=withdraw_amount,
+            amount=str(withdraw_amount),
             network="TRX",  # TRC20 네트워크
         )
         
@@ -232,13 +323,29 @@ class WithdrawHandler:
             current_step=3,
         )
         
+        # 복구: 이미 Upbit에 TRX가 도착해 있으면 바로 진행
+        trx_account = await self.upbit.get_account("TRX")
+        if trx_account and trx_account.balance > Decimal("1"):
+            logger.info(
+                f"[Withdraw Step 4] Upbit TRX 이미 도착 (복구): {trx_account.balance} TRX"
+            )
+            await self.repository.update_status(
+                transfer.transfer_id,
+                TransferStatus.CONFIRMING,
+                current_step=4,
+            )
+            return await self.repository.get(transfer.transfer_id)  # type: ignore
+        
         # Upbit 입금 확인 (폴링)
         # Upbit API는 입금 완료 대기 메서드가 없으므로 직접 구현
-        timeout = 600.0  # 10분
+        timeout = 900.0  # 15분 (TRON 네트워크 지연 고려)
         poll_interval = 30.0
         elapsed = 0.0
         
         while elapsed < timeout:
+            await asyncio.sleep(poll_interval)
+            elapsed += poll_interval
+            
             # TRX 잔고 확인
             trx_account = await self.upbit.get_account("TRX")
             if trx_account and trx_account.balance > Decimal("1"):
@@ -247,11 +354,10 @@ class WithdrawHandler:
                     f"{trx_account.balance} TRX"
                 )
                 break
-            
-            await asyncio.sleep(poll_interval)
-            elapsed += poll_interval
         else:
-            raise TimeoutError("Upbit TRX deposit not confirmed within timeout")
+            raise TimeoutError(
+                f"Upbit TRX 입금이 {int(timeout/60)}분 내에 확인되지 않음"
+            )
         
         await self.repository.update_status(
             transfer.transfer_id,
@@ -293,27 +399,8 @@ class WithdrawHandler:
             upbit_order_id=filled_order.uuid,
         )
         
-        await self.repository.update_status(
-            transfer.transfer_id,
-            TransferStatus.CONVERTING,
-            current_step=5,
-        )
-        
-        logger.info(
-            f"[Withdraw Step 5] TRX sold: {filled_order.executed_volume} TRX",
-            extra={"order_id": filled_order.uuid},
-        )
-        
-        return await self.repository.get(transfer.transfer_id)  # type: ignore
-    
-    async def _step6_complete(self, transfer: Transfer) -> Transfer:
-        """Step 6: 출금 완료"""
-        logger.info(f"[Withdraw Step 6] Completing withdraw: {transfer.transfer_id}")
-        
-        # KRW 잔고 확인하여 실제 도착 금액 기록
-        krw_account = await self.upbit.get_account("KRW")
-        actual_krw = krw_account.balance if krw_account else Decimal("0")
-        
+        # 실제 수령 KRW 금액 계산 후 저장 (전체 잔고가 아닌 이번 거래분만)
+        actual_krw = self._parse_krw_from_sell_order(filled_order)
         await self.repository.update_amounts(
             transfer.transfer_id,
             actual_amount=actual_krw,
@@ -321,16 +408,55 @@ class WithdrawHandler:
         
         await self.repository.update_status(
             transfer.transfer_id,
+            TransferStatus.CONVERTING,
+            current_step=5,
+        )
+        
+        logger.info(
+            f"[Withdraw Step 5] TRX sold: {filled_order.executed_volume} TRX -> {actual_krw} KRW",
+            extra={"order_id": filled_order.uuid},
+        )
+        
+        return await self.repository.get(transfer.transfer_id)  # type: ignore
+    
+    def _parse_krw_from_sell_order(self, order: Any) -> Decimal:
+        """TRX 매도 주문 결과에서 실제 수령 KRW 추출 (이번 출금분만)
+        
+        Upbit 시장가 매도 시: executed_funds - paid_fee = 실제 KRW
+        
+        Args:
+            order: UpbitOrder 객체 (wait_order_filled 결과)
+            
+        Returns:
+            실제 수령 KRW 금액
+        """
+        # UpbitOrder 객체에서 executed_funds, paid_fee 사용
+        gross_krw = order.executed_funds
+        paid_fee = order.paid_fee
+        
+        return max(Decimal("0"), gross_krw - paid_fee)
+    
+    async def _step6_complete(self, transfer: Transfer) -> Transfer:
+        """Step 6: 출금 완료"""
+        logger.info(f"[Withdraw Step 6] Completing withdraw: {transfer.transfer_id}")
+        
+        # actual_amount는 Step 5에서 이미 저장됨 (이번 거래분만)
+        # 여기서는 최종 상태만 업데이트
+        await self.repository.update_status(
+            transfer.transfer_id,
             TransferStatus.COMPLETED,
             current_step=6,
         )
         
+        # 저장된 actual_amount 로깅용으로 조회
+        updated_transfer = await self.repository.get(transfer.transfer_id)
+        
         logger.info(
             f"[Withdraw] Completed: {transfer.transfer_id}",
-            extra={"actual_amount": str(actual_krw)},
+            extra={"actual_amount": str(updated_transfer.actual_amount if updated_transfer else "N/A")},
         )
         
-        return await self.repository.get(transfer.transfer_id)  # type: ignore
+        return updated_transfer  # type: ignore
     
     async def get_withdraw_status(self) -> dict[str, Any]:
         """출금 가능 상태 조회
@@ -405,3 +531,98 @@ class WithdrawHandler:
             "trx_usdt_price": trx_usdt_price,
             "trx_krw_price": trx_krw_price,
         }
+    
+    async def _record_spot_trade_event(
+        self,
+        transfer_id: str,
+        side: str,
+        symbol: str,
+        qty: Decimal,
+        price: Decimal,
+        quote_qty: Decimal,
+        commission: Decimal,
+        commission_asset: str,
+        order_id: str,
+    ) -> None:
+        """SPOT 거래 이벤트 기록 (Ledger 분개용)
+        
+        TradeExecuted 이벤트로 SPOT 자산 변동을 Ledger에 기록.
+        """
+        if not self.event_store or not self.scope:
+            return
+        
+        spot_scope = Scope.create(
+            exchange=self.scope.exchange,
+            venue="SPOT",
+            symbol=symbol,
+            mode=self.scope.mode,
+        )
+        
+        payload = {
+            "symbol": symbol,
+            "side": side,
+            "qty": str(qty),
+            "price": str(price),
+            "quote_qty": str(quote_qty),
+            "commission": str(commission),
+            "commission_asset": commission_asset,
+            "order_id": order_id,
+            "is_maker": False,
+            "realized_pnl": "0",
+            "transfer_id": transfer_id,
+        }
+        
+        dedup_key = f"spot_trade:{order_id}"
+        
+        event = Event.create(
+            event_type=EventTypes.TRADE_EXECUTED,
+            entity_kind="TRADE",
+            entity_id=order_id,
+            scope=spot_scope,
+            source="BOT",
+            payload=payload,
+            dedup_key=dedup_key,
+        )
+        
+        await self.event_store.append(event)
+        logger.debug(f"[Withdraw] SPOT 거래 이벤트 기록: {side} {qty} {symbol}")
+    
+    async def _record_internal_transfer_event(
+        self,
+        transfer_id: str,
+        asset: str,
+        amount: Decimal,
+        from_venue: str,
+        to_venue: str,
+        tran_id: str,
+    ) -> None:
+        """내부 이체 이벤트 기록 (Ledger 분개용)
+        
+        InternalTransferCompleted 이벤트로 Ledger에 기록.
+        """
+        if not self.event_store or not self.scope:
+            return
+        
+        payload = {
+            "asset": asset,
+            "amount": str(amount),
+            "from_venue": f"BINANCE_{from_venue}",
+            "to_venue": f"BINANCE_{to_venue}",
+            "tran_id": tran_id,
+            "transfer_id": transfer_id,
+        }
+        
+        dedup_key = f"internal_transfer:{tran_id}"
+        
+        event = Event.create(
+            event_type=EventTypes.INTERNAL_TRANSFER_COMPLETED,
+            entity_kind="TRANSFER",
+            entity_id=tran_id,
+            scope=self.scope,
+            source="BOT",
+            payload=payload,
+            dedup_key=dedup_key,
+        )
+        
+        await self.event_store.append(event)
+        logger.debug(f"[Withdraw] 내부 이체 이벤트 기록: {amount} {asset} {from_venue} -> {to_venue}")

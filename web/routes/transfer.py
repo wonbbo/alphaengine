@@ -81,6 +81,7 @@ class DepositStatusResponse(BaseModel):
     min_deposit_krw: str
     pending_deposit: bool
     pending_transfer_id: str | None
+    any_pending: bool = False  # 입금/출금 구분 없이 진행 중 이체 존재 시 True
     # 예상 FUTURES USDT 입금액 계산용 시세 정보
     trx_usdt_price: str | None = None
     trx_krw_price: str | None = None
@@ -100,6 +101,7 @@ class WithdrawStatusResponse(BaseModel):
     warning: str | None
     pending_withdraw: bool
     pending_transfer_id: str | None
+    any_pending: bool = False  # 입금/출금 구분 없이 진행 중 이체 존재 시 True
     # 예상 출금 계산용 시세 정보
     trx_usdt_price: str | None = None
     trx_krw_price: str | None = None

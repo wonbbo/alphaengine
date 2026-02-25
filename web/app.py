@@ -107,7 +107,7 @@ async def _init_transfer_manager_for_web(settings, logger):
     from adapters.upbit.rest_client import UpbitRestClient
     from bot.transfer.manager import TransferManager
     from core.storage.event_store import EventStore
-    from core.types import Scope
+    from core.types import Scope, TradingMode
     from core.constants import Paths, BinanceEndpoints, Defaults
     
     # secrets.yaml에서 설정 로드
@@ -163,6 +163,11 @@ async def _init_transfer_manager_for_web(settings, logger):
     
     if not config["binance_api_key"] or not config["binance_api_secret"]:
         logger.info("Web: Binance API 설정 없음, 입출금 기능 비활성화")
+        return None, None, None, None
+    
+    # Testnet 모드에서는 입출금 불가 (Upbit은 실거래소만 지원, Binance Testnet과 연동 불가)
+    if settings.mode == TradingMode.TESTNET:
+        logger.info("Web: Testnet 모드, 입출금 기능 비활성화")
         return None, None, None, None
     
     try:

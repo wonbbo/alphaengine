@@ -64,15 +64,14 @@ async function loadDepositStatus() {
             
             // 24시간 이내 입금 경고 HTML
             const krwLocked24h = parseFloat(data.krw_locked_24h || 0);
-            const krwWithdrawable = parseFloat(data.krw_withdrawable || data.krw_balance);
-            const maxDepositKrw = parseFloat(data.max_deposit_krw || 0);
+            const maxDepositKrw = parseFloat(data.max_deposit_krw || 0);  // KRW+TRX 합산
             const has24hWarning = krwLocked24h > 0;
             
             const krwWarningHtml = has24hWarning ? `
                 <div class="alert alert-warning py-2 px-3 small mb-2">
                     <i class="bi bi-exclamation-triangle"></i> 
                     <strong>24시간 이내 입금 ${formatNumber(krwLocked24h)}원</strong>은 출금 불가합니다.
-                    <br><span class="text-muted">실제 입금 가능: ${formatNumber(krwWithdrawable)}원</span>
+                    <br><span class="text-muted">실제 입금 가능: ${formatNumber(maxDepositKrw)}원</span>
                 </div>
             ` : '';
             
@@ -93,7 +92,7 @@ async function loadDepositStatus() {
                     <div class="row mt-2">
                         <div class="col-6">
                             <div class="balance-label">실제 입금 가능</div>
-                            <div class="balance-value text-success fw-bold">${formatNumber(krwWithdrawable)}원</div>
+                            <div class="balance-value text-success fw-bold">${formatNumber(maxDepositKrw)}원</div>
                         </div>
                         <div class="col-6">
                             <div class="balance-label">예상 수수료</div>
@@ -110,6 +109,13 @@ async function loadDepositStatus() {
             `;
             form.classList.remove('d-none');
             unavailable.classList.add('d-none');
+            
+            // 다른 이체 진행 중이면 입금 버튼 비활성화
+            const depositBtn = document.getElementById('deposit-btn');
+            if (depositBtn) {
+                depositBtn.disabled = data.any_pending || false;
+                depositBtn.title = data.any_pending ? '다른 이체가 진행 중입니다.' : '';
+            }
             
             // 최대 입금 가능 금액 설정 (인출 가능 금액 - 수수료 기준)
             maxDepositAmount = Math.floor(maxDepositKrw);
@@ -135,7 +141,7 @@ async function loadDepositStatus() {
         } else {
             // 입금 불가 - 현재 잔고 및 24시간 경고 함께 표시
             const krwBalance = parseFloat(data.krw_balance || 0);
-            const krwWithdrawable = parseFloat(data.krw_withdrawable || krwBalance);
+            const maxDepositKrwUnavail = parseFloat(data.max_deposit_krw || 0);  // KRW+TRX 합산
             const krwLocked24h = parseFloat(data.krw_locked_24h || 0);
             const trxBalance = parseFloat(data.trx_balance || 0);
             
@@ -144,7 +150,7 @@ async function loadDepositStatus() {
                 <div class="alert alert-warning py-2 px-3 small mb-2">
                     <i class="bi bi-exclamation-triangle"></i> 
                     24시간 이내 입금 ${formatNumber(krwLocked24h)}원은 출금 불가합니다.
-                    <br><span class="text-muted">실제 입금 가능: ${formatNumber(krwWithdrawable)}원</span>
+                    <br><span class="text-muted">실제 입금 가능: ${formatNumber(maxDepositKrwUnavail)}원</span>
                 </div>
             ` : '';
             
@@ -165,7 +171,7 @@ async function loadDepositStatus() {
                     <div class="row mt-2">
                         <div class="col-12">
                             <div class="balance-label">실제 입금 가능</div>
-                            <div class="balance-value text-success">${formatNumber(krwWithdrawable)}원</div>
+                            <div class="balance-value text-success">${formatNumber(maxDepositKrwUnavail)}원</div>
                         </div>
                     </div>
                     ` : ''}
@@ -174,9 +180,9 @@ async function loadDepositStatus() {
             form.classList.add('d-none');
             unavailable.classList.remove('d-none');
             document.getElementById('deposit-unavailable-msg').textContent = 
-                krwWithdrawable < 5000
-                    ? `KRW 잔고가 부족합니다. (최소 5,000원 필요, 입금 가능: ${formatNumber(krwWithdrawable)}원)`
-                    : `입금 불가 상태입니다. (입금 가능: ${formatNumber(krwWithdrawable)}원)`;
+                maxDepositKrwUnavail < 5000
+                    ? `KRW+TRX 잔고가 부족합니다. (최소 5,000원 필요, 입금 가능: ${formatNumber(maxDepositKrwUnavail)}원)`
+                    : `입금 불가 상태입니다. (입금 가능: ${formatNumber(maxDepositKrwUnavail)}원)`;
         }
         
     } catch (error) {
@@ -256,6 +262,13 @@ async function loadWithdrawStatus() {
             `;
             form.classList.remove('d-none');
             unavailable.classList.add('d-none');
+            
+            // 다른 이체 진행 중이면 출금 버튼 비활성화
+            const withdrawBtn = document.getElementById('withdraw-btn');
+            if (withdrawBtn) {
+                withdrawBtn.disabled = data.any_pending || false;
+                withdrawBtn.title = data.any_pending ? '다른 이체가 진행 중입니다.' : '';
+            }
             
             // 포지션 경고
             if (data.has_position) {
@@ -410,7 +423,7 @@ async function loadTransferProgress(transferId) {
         const data = await response.json();
         
         // 진행 상태 표시
-        section.style.display = 'block';
+        if (section) section.style.display = 'block';
         
         const progress = (data.current_step / data.total_steps) * 100;
         document.getElementById('progress-bar').style.width = `${progress}%`;
@@ -439,6 +452,12 @@ async function loadTransferProgress(transferId) {
         const cancellable = ['PENDING', 'PURCHASING'].includes(data.status);
         cancelBtn.style.display = cancellable ? 'inline-block' : 'none';
         
+        // 상세 모달이 열려 있고 같은 이체면 내용 동기화 (목록/상세 불일치 방지)
+        const detailModal = document.getElementById('detailModal');
+        if (detailModal && detailModal.classList.contains('show') && currentTransferId === transferId) {
+            renderDetailContent(data);
+        }
+        
         // 완료/실패 시 폴링 중지 및 알림 표시
         if (['COMPLETED', 'FAILED', 'CANCELLED'].includes(data.status)) {
             stopPolling();
@@ -461,7 +480,7 @@ async function loadTransferProgress(transferId) {
             
             // 진행 상태 섹션 3초 후 숨김
             setTimeout(() => {
-                section.style.display = 'none';
+                if (section) section.style.display = 'none';
             }, 3000);
         }
         
@@ -556,59 +575,66 @@ async function loadHistory() {
 // 상세 보기
 // =========================================================================
 
-async function showTransferDetail(transferId) {
-    try {
-        const response = await fetch(`${API_BASE}/${transferId}`);
-        const data = await response.json();
-        
-        const content = document.getElementById('detail-content');
-        content.innerHTML = `
-            <dl class="row">
-                <dt class="col-sm-4">이체 ID</dt>
-                <dd class="col-sm-8"><code>${data.transfer_id}</code></dd>
-                
-                <dt class="col-sm-4">유형</dt>
-                <dd class="col-sm-8">
-                    <span class="badge ${data.transfer_type === 'DEPOSIT' ? 'bg-success' : 'bg-danger'}">
-                        ${data.transfer_type === 'DEPOSIT' ? '입금' : '출금'}
-                    </span>
-                </dd>
-                
-                <dt class="col-sm-4">상태</dt>
-                <dd class="col-sm-8">
-                    <span class="badge status-${data.status.toLowerCase()}">${getStatusText(data.status)}</span>
-                </dd>
-                
-                <dt class="col-sm-4">요청 금액</dt>
-                <dd class="col-sm-8">${formatNumber(data.requested_amount)}${data.transfer_type === 'DEPOSIT' ? '원' : ' USDT'}</dd>
-                
-                <dt class="col-sm-4">실제 금액</dt>
-                <dd class="col-sm-8">${data.actual_amount ? formatNumber(data.actual_amount) + (data.transfer_type === 'DEPOSIT' ? ' USDT' : '원') : '-'}</dd>
-                
-                <dt class="col-sm-4">진행 단계</dt>
-                <dd class="col-sm-8">${data.current_step} / ${data.total_steps}</dd>
-                
-                <dt class="col-sm-4">요청 시각</dt>
-                <dd class="col-sm-8">${formatDateTime(data.requested_at)}</dd>
-                
-                <dt class="col-sm-4">완료 시각</dt>
-                <dd class="col-sm-8">${data.completed_at ? formatDateTime(data.completed_at) : '-'}</dd>
-                
-                ${data.error_message ? `
-                <dt class="col-sm-4">에러</dt>
-                <dd class="col-sm-8 text-danger">${data.error_message}</dd>
-                ` : ''}
-            </dl>
-        `;
-        
-        // 재시도 버튼 표시
-        const retryBtn = document.getElementById('retry-btn');
+/** 상세 모달 내용 렌더링 (showTransferDetail, loadTransferProgress 공용) */
+function renderDetailContent(data) {
+    const content = document.getElementById('detail-content');
+    if (!content) return;
+    content.innerHTML = `
+        <dl class="row">
+            <dt class="col-sm-4">이체 ID</dt>
+            <dd class="col-sm-8"><code>${data.transfer_id}</code></dd>
+            
+            <dt class="col-sm-4">유형</dt>
+            <dd class="col-sm-8">
+                <span class="badge ${data.transfer_type === 'DEPOSIT' ? 'bg-success' : 'bg-danger'}">
+                    ${data.transfer_type === 'DEPOSIT' ? '입금' : '출금'}
+                </span>
+            </dd>
+            
+            <dt class="col-sm-4">상태</dt>
+            <dd class="col-sm-8">
+                <span class="badge status-${data.status.toLowerCase()}">${getStatusText(data.status)}</span>
+            </dd>
+            
+            <dt class="col-sm-4">요청 금액</dt>
+            <dd class="col-sm-8">${formatNumber(data.requested_amount)}${data.transfer_type === 'DEPOSIT' ? '원' : ' USDT'}</dd>
+            
+            <dt class="col-sm-4">실제 금액</dt>
+            <dd class="col-sm-8">${data.actual_amount ? formatNumber(data.actual_amount) + (data.transfer_type === 'DEPOSIT' ? ' USDT' : '원') : '-'}</dd>
+            
+            <dt class="col-sm-4">진행 단계</dt>
+            <dd class="col-sm-8">${data.current_step} / ${data.total_steps}</dd>
+            
+            <dt class="col-sm-4">요청 시각</dt>
+            <dd class="col-sm-8">${formatDateTime(data.requested_at)}</dd>
+            
+            <dt class="col-sm-4">완료 시각</dt>
+            <dd class="col-sm-8">${data.completed_at ? formatDateTime(data.completed_at) : '-'}</dd>
+            
+            ${(data.status === 'FAILED' && data.error_message) ? `
+            <dt class="col-sm-4">에러</dt>
+            <dd class="col-sm-8 text-danger">${data.error_message}</dd>
+            ` : ''}
+        </dl>
+    `;
+    
+    const retryBtn = document.getElementById('retry-btn');
+    if (retryBtn) {
         if (data.status === 'FAILED') {
             retryBtn.classList.remove('d-none');
             retryBtn.dataset.transferId = data.transfer_id;
         } else {
             retryBtn.classList.add('d-none');
         }
+    }
+}
+
+async function showTransferDetail(transferId) {
+    try {
+        const response = await fetch(`${API_BASE}/${transferId}`);
+        const data = await response.json();
+        
+        renderDetailContent(data);
         
         const modal = new bootstrap.Modal(document.getElementById('detailModal'));
         modal.show();
@@ -670,12 +696,15 @@ async function retryTransfer() {
             throw new Error(error.detail || '재시도 실패');
         }
         
-        bootstrap.Modal.getInstance(document.getElementById('detailModal')).hide();
-        
+        // 모달 유지 - 폴링으로 상세 내용 실시간 갱신 (목록/상세 동기화)
         currentTransferId = transferId;
         loadTransferProgress(transferId);
         startPolling();
         loadHistory();
+        
+        // 재시도로 이체가 진행 중이 되었으므로 입출금 버튼 즉시 비활성화
+        loadDepositStatus();
+        loadWithdrawStatus();
         
     } catch (error) {
         alert('재시도 실패: ' + error.message);
@@ -693,7 +722,7 @@ function startPolling() {
         if (currentTransferId) {
             loadTransferProgress(currentTransferId);
         }
-    }, 5000); // 5초마다
+    }, 2000); // 2초마다 (목록/상세 동기화 개선)
 }
 
 function stopPolling() {

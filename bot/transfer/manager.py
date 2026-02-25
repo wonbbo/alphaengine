@@ -63,6 +63,8 @@ class TransferManager:
             repository=self.repository,
             binance_trx_address=binance_trx_address,
             db=db,
+            event_store=event_store,
+            scope=scope,
         )
         
         self.withdraw_handler = WithdrawHandler(
@@ -70,6 +72,8 @@ class TransferManager:
             binance=binance,
             repository=self.repository,
             upbit_trx_address=upbit_trx_address,
+            event_store=event_store,
+            scope=scope,
         )
         
         # 모니터링 태스크
@@ -142,6 +146,10 @@ class TransferManager:
         pending = await self.repository.get_pending_transfers(TransferType.DEPOSIT)
         status["pending_deposit"] = len(pending) > 0
         status["pending_transfer_id"] = pending[0].transfer_id if pending else None
+        
+        # 전체 진행 중 이체 (입금/출금 구분 없음) - 버튼 disable용
+        any_pending = await self.repository.get_pending_transfers()
+        status["any_pending"] = len(any_pending) > 0
         
         return status
     
@@ -241,6 +249,10 @@ class TransferManager:
         pending = await self.repository.get_pending_transfers(TransferType.WITHDRAW)
         status["pending_withdraw"] = len(pending) > 0
         status["pending_transfer_id"] = pending[0].transfer_id if pending else None
+        
+        # 전체 진행 중 이체 (입금/출금 구분 없음) - 버튼 disable용
+        any_pending = await self.repository.get_pending_transfers()
+        status["any_pending"] = len(any_pending) > 0
         
         return status
     

@@ -7,7 +7,7 @@ Trend Indicators
 from typing import Any
 
 import pandas as pd
-
+from ta.trend import SMAIndicator, EMAIndicator, MACD
 
 def sma(ohlcv: pd.DataFrame, params: dict[str, Any]) -> pd.Series:
     """단순 이동평균 (Simple Moving Average)
@@ -35,7 +35,7 @@ def sma(ohlcv: pd.DataFrame, params: dict[str, Any]) -> pd.Series:
     
     source = params.get("source", "close")
     
-    return ohlcv[source].rolling(window=int(period)).mean()
+    return SMAIndicator(ohlcv[source], window=int(period)).sma_indicator().bfill()
 
 
 def ema(ohlcv: pd.DataFrame, params: dict[str, Any]) -> pd.Series:
@@ -64,7 +64,7 @@ def ema(ohlcv: pd.DataFrame, params: dict[str, Any]) -> pd.Series:
     
     source = params.get("source", "close")
     
-    return ohlcv[source].ewm(span=int(period), adjust=False).mean()
+    return EMAIndicator(ohlcv[source], window=int(period)).ema_indicator().bfill()
 
 
 def macd(
@@ -103,11 +103,10 @@ def macd(
     
     prices = ohlcv[source]
     
-    fast_ema = prices.ewm(span=fast, adjust=False).mean()
-    slow_ema = prices.ewm(span=slow, adjust=False).mean()
+    macd = MACD(prices, window_slow=slow, window_fast=fast, window_sign=signal_period)
     
-    macd_line = fast_ema - slow_ema
-    signal_line = macd_line.ewm(span=signal_period, adjust=False).mean()
-    histogram = macd_line - signal_line
+    macd_line = macd.macd().bfill()
+    signal_line = macd.macd_signal().bfill()
+    histogram = macd.macd_diff().bfill()
     
     return macd_line, signal_line, histogram

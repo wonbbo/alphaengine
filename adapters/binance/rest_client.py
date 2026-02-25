@@ -790,12 +790,49 @@ class BinanceRestClient:
         
         return data
     
+    async def get_spot_lot_size(self, symbol: str) -> tuple[str, str]:
+        """Spot 심볼 LOT_SIZE 필터 조회 (LOT_SIZE 오류 방지)
+        
+        Args:
+            symbol: 심볼 (예: TRXUSDT)
+            
+        Returns:
+            (step_size, min_qty) 예: ("0.1", "1")
+        """
+        data = await self._spot_request(
+            "GET",
+            "/api/v3/exchangeInfo",
+            params={"symbol": symbol},
+        )
+        for s in data.get("symbols", []):
+            if s.get("symbol") == symbol:
+                for f in s.get("filters", []):
+                    if f.get("filterType") == "LOT_SIZE":
+                        return (f.get("stepSize", "0.1"), f.get("minQty", "0"))
+        return ("0.1", "0")
+
+    def _round_down_to_step(self, quantity: str, step_size: str) -> str:
+        """수량을 step_size에 맞게 내림 (LOT_SIZE 필터 준수)
+        
+        quantity % step_size == 0 이 되도록 floor(quantity/step)*step
+        """
+        from decimal import Decimal, ROUND_DOWN
+        q = Decimal(quantity)
+        step = Decimal(step_size)
+        if step <= 0:
+            return quantity
+        multiplier = (q / step).quantize(Decimal("1"), rounding=ROUND_DOWN)
+        result = (multiplier * step).normalize()
+        return str(result)
+
     async def spot_market_sell(
         self,
         symbol: str,
         quantity: str,
     ) -> dict[str, Any]:
         """Spot 시장가 매도 (코인을 USDT로 환전)
+        
+        LOT_SIZE 필터 준수를 위해 quantity를 step_size에 맞게 내림.
         
         Args:
             symbol: 심볼 (예: TRXUSDT)
@@ -804,11 +841,18 @@ class BinanceRestClient:
         Returns:
             주문 결과
         """
+        step_size, min_qty = await self.get_spot_lot_size(symbol)
+        quantity_rounded = self._round_down_to_step(quantity, step_size)
+        if float(quantity_rounded) < float(min_qty):
+            raise BinanceApiError(
+                code=-1013,
+                message=f"LOT_SIZE: quantity {quantity_rounded} < minQty {min_qty}",
+            )
         params = {
             "symbol": symbol,
             "side": "SELL",
             "type": "MARKET",
-            "quantity": quantity,
+            "quantity": quantity_rounded,
         }
         
         data = await self._spot_request(
@@ -893,6 +937,35 @@ class BinanceRestClient:
         )
         
         return data
+    
+    async def get_asset_detail(self, asset: str) -> dict[str, Any] | None:
+        """자산 상세 정보 조회 (출금 수수료, 최소 출금 금액 등)
+        
+        Args:
+            asset: 자산 코드 (예: TRX, USDT)
+            
+        Returns:
+            {"minWithdrawAmount": "1.0", "withdrawFee": 1, "withdrawStatus": true, ...}
+            또는 None (조회 실패 시)
+        """
+        try:
+            data = await self._spot_request(
+                "GET",
+                "/sapi/v1/asset/assetDetail",
+                params={"asset": asset.upper()},
+                signed=True,
+            )
+            # 응답: {"TRX": {...}} 형태 또는 단일 자산
+            coin_info = data.get(asset.upper(), data)
+            if isinstance(coin_info, dict) and "withdrawFee" in coin_info:
+                return coin_info
+            return None
+        except Exception as e:
+            logger.warning(
+                f"자산 상세 조회 실패 (fallback 사용): {asset} - {e}",
+                extra={"asset": asset},
+            )
+            return None
     
     async def withdraw_coin(
         self,
@@ -1023,6 +1096,7 @@ class BinanceRestClient:
         min_amount: float,
         timeout: float = 600.0,
         poll_interval: float = 30.0,
+        since_time_ms: int | None = None,
     ) -> dict[str, Any] | None:
         """입금 확인 대기
         
@@ -1033,11 +1107,16 @@ class BinanceRestClient:
             min_amount: 최소 입금 금액
             timeout: 최대 대기 시간 (초)
             poll_interval: 폴링 간격 (초)
+            since_time_ms: 조회 시작 시각 (밀리초). 미지정 시 24시간 전부터 조회.
             
         Returns:
             입금 정보 또는 None (타임아웃)
         """
-        start_time = int(time.time() * 1000) - 60000  # 1분 전부터
+        # 이체 요청 시점부터 조회 (이미 입금된 경우를 위해 충분히 과거로)
+        if since_time_ms is not None:
+            start_time = since_time_ms
+        else:
+            start_time = int(time.time() * 1000) - (24 * 60 * 60 * 1000)  # 24시간 전
         
         elapsed = 0.0
         while elapsed < timeout:

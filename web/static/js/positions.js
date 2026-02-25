@@ -55,7 +55,7 @@ async function loadPositions() {
     const tbody = document.getElementById('positions-table');
     if (!tbody) return;
     
-    tbody.innerHTML = '<tr><td colspan="8" class="text-center"><div class="spinner-border spinner-border-sm"></div> 로딩 중...</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="9" class="text-center"><div class="spinner-border spinner-border-sm"></div> 로딩 중...</td></tr>';
     
     try {
         const params = {
@@ -70,18 +70,9 @@ async function loadPositions() {
         const data = await AE.api(`/api/positions${queryString}`);
         
         if (!data.positions || data.positions.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted">포지션 없음</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="9" class="text-center text-muted">포지션 없음</td></tr>';
             updatePaginationInfo(0, currentLimit, currentOffset);
             return;
-        }
-        
-        // 첫 번째 포지션에서 심볼을 추출하여 타이틀에 표시
-        const firstSymbol = data.positions[0]?.symbol;
-        if (firstSymbol) {
-            const titleEl = document.getElementById('page-title');
-            if (titleEl) {
-                titleEl.innerHTML = `<i class="bi bi-graph-up-arrow"></i> 포지션 히스토리 (${firstSymbol})`;
-            }
         }
         
         tbody.innerHTML = data.positions.map(pos => {
@@ -92,6 +83,7 @@ async function loadPositions() {
             
             return `
                 <tr onclick="window.location.href='/positions/${pos.session_id}'" style="cursor: pointer;">
+                    <td><code>${pos.symbol || '-'}</code></td>
                     <td>${openedAt}</td>
                     <td class="d-none d-md-table-cell">${closedAt}</td>
                     <td>${AE.statusBadge(pos.side)}</td>
@@ -109,7 +101,7 @@ async function loadPositions() {
         
     } catch (error) {
         console.error('Load positions error:', error);
-        tbody.innerHTML = '<tr><td colspan="8" class="text-center text-danger">로드 실패</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="9" class="text-center text-danger">로드 실패</td></tr>';
     }
 }
 
@@ -213,7 +205,24 @@ async function loadPositionDetail(sessionId) {
         document.getElementById('detail-initial-qty').textContent = AE.formatQuantity(data.initial_qty);
         document.getElementById('detail-max-qty').textContent = AE.formatQuantity(data.max_qty);
         document.getElementById('detail-trade-count').textContent = data.trade_count || 0;
-        document.getElementById('detail-commission').textContent = `${AE.formatCommission(data.total_commission)} USDT`;
+        
+        // 거래 수익 (realized_pnl) - 색상 표시, 소수점 6자리
+        const realizedPnlFormatted = AE.formatAmount(data.realized_pnl || 0, 6);
+        document.getElementById('detail-realized-pnl').innerHTML = 
+            `<span class="${realizedPnlFormatted.class}">${realizedPnlFormatted.text} USDT</span>`;
+        
+        // 총 수수료 - 항상 붉은색 음수로 표시 (비용이므로)
+        const commissionVal = Math.abs(parseFloat(data.total_commission || 0));
+        document.getElementById('detail-commission').innerHTML =
+            `<span class="text-danger">-${AE.formatCommission(commissionVal)} USDT</span>`;
+        
+        // 실제 수익 = 거래 수익 - 총 수수료 - 색상 표시, 소수점 6자리
+        const realizedPnl = parseFloat(data.realized_pnl || 0);
+        const totalCommission = parseFloat(data.total_commission || 0);
+        const netProfitFormatted = AE.formatAmount(realizedPnl - totalCommission, 6);
+        document.getElementById('detail-net-profit').innerHTML = 
+            `<span class="${netProfitFormatted.class}">${netProfitFormatted.text} USDT</span>`;
+        
         document.getElementById('detail-close-reason').textContent = data.close_reason || '-';
         
     } catch (error) {

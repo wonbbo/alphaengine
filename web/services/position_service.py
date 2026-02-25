@@ -142,7 +142,7 @@ class PositionService:
         if not row:
             return None
         
-        return {
+        result = {
             "session_id": row[0],
             "scope_mode": row[1],
             "scope_venue": row[2],
@@ -158,6 +158,43 @@ class PositionService:
             "trade_count": row[12],
             "close_reason": row[13],
         }
+        
+        # projection_position에서 레버리지 조회 (해당 심볼의 현재/최근 레버리지)
+        leverage = await self._get_leverage_for_symbol(
+            scope_mode=row[1],
+            scope_venue=row[2],
+            symbol=row[3],
+        )
+        result["leverage"] = leverage
+        
+        return result
+    
+    async def _get_leverage_for_symbol(
+        self,
+        scope_mode: str,
+        scope_venue: str,
+        symbol: str,
+    ) -> int | None:
+        """projection_position에서 해당 심볼의 레버리지 조회"""
+        try:
+            leverage_row = await self.db.fetchone(
+                """
+                SELECT leverage
+                FROM projection_position
+                WHERE scope_exchange = ?
+                  AND scope_venue = ?
+                  AND scope_account_id = ?
+                  AND scope_mode = ?
+                  AND scope_symbol = ?
+                LIMIT 1
+                """,
+                (Defaults.EXCHANGE, scope_venue, Defaults.ACCOUNT_ID, scope_mode, symbol),
+            )
+            if leverage_row:
+                return int(leverage_row[0]) if leverage_row[0] is not None else None
+        except Exception as e:
+            logger.debug(f"Leverage lookup failed: {e}")
+        return None
     
     async def get_position_trades(self, session_id: str) -> list[dict[str, Any]]:
         """포지션 내 거래 목록 조회
