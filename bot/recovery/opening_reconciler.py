@@ -142,17 +142,18 @@ class OpeningBalanceReconciler:
         except Exception as e:
             logger.error(f"FUTURES 잔고 조회 실패: {e}")
         
-        # SPOT 잔고 조회
-        try:
-            spot_balances = await self.rest_client.get_spot_balances()
-            for asset, balance_info in spot_balances.items():
-                free = Decimal(balance_info.get("free", "0"))
-                locked = Decimal(balance_info.get("locked", "0"))
-                total = free + locked
-                if total > 0:
-                    result["SPOT"][asset] = total
-        except Exception as e:
-            logger.error(f"SPOT 잔고 조회 실패: {e}")
+        # SPOT 잔고 조회 (testnet은 SPOT 미사용이라 호출 생략)
+        if self.scope.mode != "TESTNET":
+            try:
+                spot_balances = await self.rest_client.get_spot_balances()
+                for asset, balance_info in spot_balances.items():
+                    free = Decimal(balance_info.get("free", "0"))
+                    locked = Decimal(balance_info.get("locked", "0"))
+                    total = free + locked
+                    if total > 0:
+                        result["SPOT"][asset] = total
+            except Exception as e:
+                logger.error(f"SPOT 잔고 조회 실패: {e}")
         
         return result
     

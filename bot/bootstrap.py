@@ -168,8 +168,15 @@ class BotEngine:
             api_secret=self.settings.api_secret,
         )
     
-    async def _load_strategy_config_from_store(self) -> dict[str, Any]:
+    async def _load_strategy_config_from_store(
+        self,
+        use_cache: bool = True,
+    ) -> dict[str, Any]:
         """전략 설정 로드 (config_store 우선)
+        
+        Args:
+            use_cache: True면 ConfigStore 캐시 사용. 엔진 재개 시 Web이 저장한
+                       최신 값을 보려면 False로 호출.
         
         Returns:
             전략 설정 딕셔너리:
@@ -188,7 +195,7 @@ class BotEngine:
                 "auto_start": False,
             }
         
-        strategy_config = await self.config_store.get("strategy")
+        strategy_config = await self.config_store.get("strategy", use_cache=use_cache)
         logger.info(f"전략 설정 로드: {strategy_config}")
         return strategy_config
     
@@ -609,8 +616,8 @@ class BotEngine:
             )
             return True
         
-        # 전략이 로드되어 있지 않은 경우 → 설정에서 로드 후 시작
-        strategy_config = await self._load_strategy_config_from_store()
+        # 전략이 로드되어 있지 않은 경우 → 설정에서 로드 후 시작 (캐시 무시하여 Web 저장값 반영)
+        strategy_config = await self._load_strategy_config_from_store(use_cache=False)
         module_path = strategy_config.get("module")
         class_name = strategy_config.get("class")
         params = strategy_config.get("params", {})

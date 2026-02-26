@@ -214,8 +214,8 @@ class ConfigStore:
             self._cache.pop(key, None)
             self._cache_version.pop(key, None)
             
-            # heartbeat 로그는 너무 자주 발생하므로 표시하지 않음
-            if updated_by not in ["bot:heartbeat", "bot:price"]:
+            # 자주 발생하는 시스템 갱신은 로그 생략 (heartbeat, price, poller 등)
+            if updated_by not in ["bot:heartbeat", "bot:price", "bot:system"]:
                 logger.info(f"Config '{key}' updated by {updated_by}")
             return True
             
