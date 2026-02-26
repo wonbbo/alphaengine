@@ -47,6 +47,7 @@ DEFAULT_CONFIGS: dict[str, dict[str, Any]] = {
         "class": None,  # 전략 클래스명
         "params": {},  # 전략 파라미터
         "auto_start": False,  # 봇 시작 시 자동 시작
+        "timeframe": "5m",  # 봉 주기 (전략 틱 호출 시점): 1m, 3m, 5m, 15m, 30m, 1h, 2h, 4h 등
     },
     "strategy_state": {
         # Bot 재시작 시에도 유지되어야 하는 전략 상태

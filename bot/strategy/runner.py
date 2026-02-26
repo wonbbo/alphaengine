@@ -68,6 +68,7 @@ class StrategyRunner:
         engine_mode_getter: Any = None,
         risk_config_getter: Any = None,
         config_store: Any = None,
+        timeframe_getter: Any = None,
     ):
         self.event_store = event_store
         self.command_store = command_store
@@ -78,6 +79,7 @@ class StrategyRunner:
         self.engine_mode_getter = engine_mode_getter
         self.risk_config_getter = risk_config_getter
         self.config_store = config_store
+        self.timeframe_getter = timeframe_getter
         
         # 전략 인스턴스
         self._strategy: Strategy | None = None
@@ -360,13 +362,18 @@ class StrategyRunner:
         """표준 컨텍스트 구성 (중복 제거용)"""
         engine_mode = await self._get_engine_mode()
         risk_config = await self._get_risk_config()
-        
+        timeframe = (
+            await self.timeframe_getter()
+            if self.timeframe_getter
+            else "5m"
+        )
         return await self._context_builder.build(
             projector=self.projector,
             market_data_provider=self.market_data_provider,
             engine_mode=engine_mode,
             strategy_state=self._strategy_state,
             risk_config=risk_config,
+            timeframe=timeframe,
         )
     
     async def _record_strategy_event(self, action: str) -> None:

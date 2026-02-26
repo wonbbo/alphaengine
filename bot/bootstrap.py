@@ -19,12 +19,17 @@ import logging
 from decimal import Decimal
 from uuid import uuid4
 from typing import Any
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from adapters.binance.rest_client import BinanceRestClient
 from adapters.db.sqlite_adapter import SQLiteAdapter, init_schema
 from core.config.loader import get_settings
 from core.constants import BinanceEndpoints, Defaults, Paths
+from core.utils.candle_schedule import (
+    timeframe_to_minutes,
+    get_last_candle_close_utc,
+    get_run_at_after_close,
+)
 from core.domain.events import Event
 from core.domain.state_machines import EngineStateMachine, EngineState
 from core.logging import setup_logging
@@ -120,12 +125,14 @@ class BotEngine:
         
         # 설정
         self.target_symbol = settings.target_symbol if hasattr(settings, 'target_symbol') else "XRPUSDT"
-        self.tick_interval = 0.1  # 100ms
-        self.strategy_tick_interval = 5.0  # 5초 (5분봉 기준)
+        self.tick_interval = 0.1  # 100ms (메인 루프 주기)
+        # 봉 마감 후 전략 틱 실행을 위한 지연(초). 거래소 봉 확정 후 호출
+        self.candle_close_delay_seconds = 1
         
         # 통계
         self._tick_count = 0
-        self._last_strategy_tick = 0.0
+        # 마지막 전략 틱을 실행한 봉 마감 시각(UTC). 봉 단위로 1회만 호출하기 위함
+        self._last_strategy_tick_utc: datetime | None = None
         self._started_at: str | None = None  # Bot 시작 시간 (ISO 형식)
     
     def _create_scope(self) -> Scope:
@@ -388,7 +395,7 @@ class BotEngine:
         )
         logger.info("  - MarketDataProvider 초기화 완료")
         
-        # 8. Strategy Runner (ConfigStore 리스크 설정 + 상태 저장 연결)
+        # 8. Strategy Runner (ConfigStore 리스크 설정 + 상태 저장 + 봉 단위 timeframe)
         self.strategy_runner = StrategyRunner(
             event_store=self.event_store,
             command_store=self.command_store,
@@ -399,6 +406,7 @@ class BotEngine:
             engine_mode_getter=self._get_engine_mode,
             risk_config_getter=self.config_store.get_risk_config,
             config_store=self.config_store,
+            timeframe_getter=self._get_strategy_timeframe,
         )
         
         # 전략 상태 변경 시 즉시 config_store에 반영 (Web에서 조회 가능)
@@ -549,6 +557,16 @@ class BotEngine:
     async def _get_engine_mode(self) -> str:
         """엔진 모드 조회"""
         return self.state_machine.state
+
+    async def _get_strategy_timeframe(self) -> str:
+        """전략 봉 주기 조회 (config_store strategy.timeframe, 기본 5m)"""
+        if not self.config_store:
+            return Defaults.TIMEFRAME
+        try:
+            strategy_config = await self.config_store.get("strategy")
+            return strategy_config.get("timeframe") or Defaults.TIMEFRAME
+        except Exception:
+            return Defaults.TIMEFRAME
     
     async def _set_engine_mode(self, mode: str) -> None:
         """엔진 모드 설정"""
@@ -1048,11 +1066,34 @@ class BotEngine:
                 if self.reconciler:
                     await self.reconciler.tick()
                 
-                # 4. Strategy Runner: 전략 tick (주기적)
-                now = asyncio.get_event_loop().time()
-                if now - self._last_strategy_tick >= self.strategy_tick_interval:
-                    self._last_strategy_tick = now
-                    if self.strategy_runner and self.strategy_runner.is_running:
+                # 4. Strategy Runner: 봉 마감 시에만 전략 tick (5m이면 0:05:01, 0:10:01, …)
+                if self.strategy_runner and self.strategy_runner.is_running:
+                    timeframe = await self._get_strategy_timeframe()
+                    interval_minutes = timeframe_to_minutes(timeframe)
+                    now_utc = datetime.now(timezone.utc)
+                    # 방금 마감 후 delay초가 지난 봉: (now - delay) 이하의 가장 최근 마감 시각
+                    after_delay = now_utc - timedelta(seconds=self.candle_close_delay_seconds)
+                    candidate_close_utc = get_last_candle_close_utc(after_delay, interval_minutes)
+                    run_at = get_run_at_after_close(
+                        candidate_close_utc,
+                        delay_seconds=self.candle_close_delay_seconds,
+                    )
+                    # 첫 시작 시: run_at이 오래 지났으면 스킵(이미 지나간 봉). 다음 봉 마감+delay까지 대기
+                    seconds_since_run_at = (now_utc - run_at).total_seconds()
+                    first_run_ok = (
+                        self._last_strategy_tick_utc is not None
+                        or (seconds_since_run_at >= 0 and seconds_since_run_at < 60)
+                    )
+                    should_tick = (
+                        now_utc >= run_at
+                        and first_run_ok
+                        and (
+                            self._last_strategy_tick_utc is None
+                            or candidate_close_utc > self._last_strategy_tick_utc
+                        )
+                    )
+                    if should_tick:
+                        self._last_strategy_tick_utc = candidate_close_utc
                         await self.strategy_runner.tick()
                 
                 # 5. BnbFeeManager: BNB 비율 체크 및 자동 충전 (주기적)

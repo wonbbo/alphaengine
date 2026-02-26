@@ -43,6 +43,7 @@ class ContextBuilder:
         engine_mode: str = "RUNNING",
         strategy_state: dict[str, Any] | None = None,
         risk_config: dict[str, Any] | None = None,
+        timeframe: str = "5m",
     ) -> StrategyTickContext:
         """컨텍스트 구성
         
@@ -52,6 +53,7 @@ class ContextBuilder:
             engine_mode: 엔진 모드
             strategy_state: 전략 상태 (유지됨)
             risk_config: 리스크/리워드 설정 (config_store의 "risk" 키)
+            timeframe: 봉 주기 (예: 5m, 15m). OHLCV/Bar 조회에 사용
             
         Returns:
             StrategyTickContext
@@ -61,8 +63,8 @@ class ContextBuilder:
         position = await self._get_position(projector)
         balances = await self._get_balances(projector)
         open_orders = await self._get_open_orders(projector)
-        ohlcv = await self._get_ohlcv(market_data_provider)
-        bars = await self._get_bars(market_data_provider)
+        ohlcv = await self._get_ohlcv(market_data_provider, timeframe)
+        bars = await self._get_bars(market_data_provider, timeframe)
         
         # 현재가: OHLCV DataFrame에서 가져오거나 bars에서 가져옴
         if len(ohlcv) > 0:
@@ -185,7 +187,11 @@ class ContextBuilder:
             logger.warning(f"Failed to get open orders: {e}")
             return []
     
-    async def _get_ohlcv(self, market_data_provider: Any) -> pd.DataFrame:
+    async def _get_ohlcv(
+        self,
+        market_data_provider: Any,
+        timeframe: str = "5m",
+    ) -> pd.DataFrame:
         """OHLCV DataFrame 조회
         
         Returns:
@@ -197,7 +203,7 @@ class ContextBuilder:
         try:
             ohlcv = await market_data_provider.get_ohlcv(
                 symbol=self.scope.symbol,
-                timeframe="5m",
+                timeframe=timeframe,
                 limit=MAX_OHLCV_COUNT,
             )
             return ohlcv
@@ -206,7 +212,11 @@ class ContextBuilder:
             logger.warning(f"Failed to get OHLCV: {e}")
             return pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
     
-    async def _get_bars(self, market_data_provider: Any) -> list[Bar]:
+    async def _get_bars(
+        self,
+        market_data_provider: Any,
+        timeframe: str = "5m",
+    ) -> list[Bar]:
         """캔들 데이터 조회"""
         if not market_data_provider:
             return []
@@ -214,7 +224,7 @@ class ContextBuilder:
         try:
             bars_data = await market_data_provider.get_bars(
                 symbol=self.scope.symbol,
-                timeframe="5m",
+                timeframe=timeframe,
                 limit=MAX_OHLCV_COUNT,
             )
             
