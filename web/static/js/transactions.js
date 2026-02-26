@@ -1,8 +1,10 @@
 /**
  * 거래 내역 페이지
+ * 선물/현물/모두 필터, 기본은 선물만 표시
  */
 
 let currentSymbol = null;
+let currentVenue = 'FUTURES';  // FUTURES(선물) / SPOT(현물) / ALL(모두), 기본 선물
 let currentLimit = 50;
 let currentOffset = 0;
 
@@ -11,7 +13,18 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 function initTransactions() {
-    // 초기 로드
+    // venue 필터 버튼
+    document.querySelectorAll('[id^="filter-venue-"]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const venue = btn.getAttribute('data-venue');
+            if (!venue) return;
+            currentVenue = venue;
+            currentOffset = 0;
+            document.querySelectorAll('[id^="filter-venue-"]').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            loadTransactions();
+        });
+    });
     loadTransactions();
 }
 
@@ -23,6 +36,7 @@ async function loadTransactions() {
     
     try {
         const params = {
+            venue: currentVenue,
             limit: currentLimit,
             offset: currentOffset,
         };
@@ -42,13 +56,25 @@ async function loadTransactions() {
         tbody.innerHTML = data.transactions.map(tx => {
             const pnl = AE.formatAmount(tx.realized_pnl || 0);
             const timeStr = AE.formatKST(tx.ts);
+            const venueBadge = tx.scope_venue === 'FUTURES'
+                ? '<span class="badge bg-primary">선물</span>'
+                : (tx.scope_venue === 'SPOT' ? '<span class="badge bg-info">현물</span>' : '<span class="badge bg-light text-dark">-</span>');
+            // 거래: 매수=양수(초록), 매도=음수(빨강), 아이콘+텍스트로 접근성 확보
+            const bought = parseFloat(tx.bought_qty) || 0;
+            const sold = parseFloat(tx.sold_qty) || 0;
+            const isBuy = bought > 0;
+            const qtyStr = isBuy ? AE.formatQuantity(tx.bought_qty) : AE.formatQuantity(tx.sold_qty);
+            const signedQty = isBuy ? `+${qtyStr}` : `-${qtyStr}`;
+            const tradeCell = isBuy
+                ? `<span class="text-success" title="매수"><i class="bi bi-arrow-up"></i> ${signedQty} <small class="text-muted">매수</small></span>`
+                : `<span class="text-danger" title="매도"><i class="bi bi-arrow-down"></i> ${signedQty} <small class="text-muted">매도</small></span>`;
             
             return `
                 <tr>
                     <td><code>${tx.symbol || '-'}</code></td>
+                    <td>${venueBadge}</td>
                     <td>${timeStr}</td>
-                    <td class="text-end">${AE.formatQuantity(tx.bought_qty)}</td>
-                    <td class="text-end">${AE.formatQuantity(tx.sold_qty)}</td>
+                    <td class="text-end">${tradeCell}</td>
                     <td class="text-end d-none d-sm-table-cell">${AE.formatCommission(tx.fee_usdt || 0)}</td>
                     <td class="text-end ${pnl.class}">${pnl.text}</td>
                 </tr>

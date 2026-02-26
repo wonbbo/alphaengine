@@ -222,6 +222,29 @@ class ConfigStore:
             logger.error(f"Failed to set config '{key}': {e}")
             return False
     
+    async def delete(self, key: str) -> bool:
+        """설정 키 삭제 (임시 데이터 정리용)
+        
+        Args:
+            key: 삭제할 설정 키
+            
+        Returns:
+            삭제 성공 여부 (키가 없어도 True)
+        """
+        try:
+            await self.db.execute(
+                "DELETE FROM config_store WHERE config_key = ?",
+                (key,),
+            )
+            await self.db.commit()
+            self._cache.pop(key, None)
+            self._cache_version.pop(key, None)
+            logger.debug(f"Config '{key}' deleted")
+            return True
+        except Exception as e:
+            logger.warning(f"Failed to delete config '{key}': {e}")
+            return False
+    
     async def update_field(
         self,
         key: str,

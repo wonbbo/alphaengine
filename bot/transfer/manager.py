@@ -410,6 +410,9 @@ class TransferManager:
             TransferStatus.CANCELLED,
             error_message="사용자 취소",
         )
+        # 입금 임시 설정 키 정리 (deposit:step2_trx:{id} 등)
+        if transfer.transfer_type == TransferType.DEPOSIT:
+            await self.deposit_handler.clear_temp_config(transfer_id)
         
         logger.info(f"Transfer cancelled: {transfer_id}")
         

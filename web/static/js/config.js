@@ -138,18 +138,13 @@ const DEFAULT_CONFIGS = {
     },
 };
 
-// 읽기 전용 설정 키 (시스템에서만 변경 가능, config_service.py와 동기화)
-const READONLY_CONFIG_KEYS = [
-    "bot_status",
-    "strategy_state",
-    "price_cache",
-    "initial_capital",
-    "poller_income_last_poll",
-    "poller_transfer_last_poll",
-    "poller_convert_last_poll",
-    "poller_deposit_withdraw_last_poll",
-    "poller_reconciliation_last_poll",
-    "poller_reconciliation_last_reconciliation",
+// 편집 가능한 정책 설정 키 (화이트리스트). 이 목록에 있는 키만 편집/삭제 가능. config_service.py와 동기화
+const EDITABLE_CONFIG_KEYS = [
+    "engine",
+    "risk",
+    "strategy",
+    "transfer",
+    "bnb_fee",
 ];
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -279,9 +274,9 @@ async function loadConfigs() {
             return;
         }
         
-        // 편집 가능 / 편집 불가 분리
-        const editableConfigs = configsData.filter(c => !READONLY_CONFIG_KEYS.includes(c.key));
-        const readonlyConfigs = configsData.filter(c => READONLY_CONFIG_KEYS.includes(c.key));
+        // 정책 설정(편집 가능) / 시스템 상태(읽기 전용) 분리
+        const editableConfigs = configsData.filter(c => EDITABLE_CONFIG_KEYS.includes(c.key));
+        const readonlyConfigs = configsData.filter(c => !EDITABLE_CONFIG_KEYS.includes(c.key));
         
         // 알파벳순 정렬
         editableConfigs.sort((a, b) => a.key.localeCompare(b.key));
@@ -294,17 +289,17 @@ async function loadConfigs() {
         document.getElementById('editable-count').textContent = editableConfigs.length;
         document.getElementById('readonly-count').textContent = readonlyConfigs.length;
         
-        // 편집 가능한 설정 카드 렌더링
+        // 정책 설정(편집 가능) 카드 렌더링
         const editableGrid = document.getElementById('editable-configs-grid');
         editableGrid.innerHTML = editableConfigs.length > 0
             ? editableConfigs.map((config) => renderConfigCard(config, false)).join('')
-            : '<div class="col-12 text-center py-3 text-muted">편집 가능한 설정이 없습니다.</div>';
+            : '<div class="col-12 text-center py-3 text-muted">정책 설정이 없습니다. Bot을 시작하면 기본 설정이 생성됩니다.</div>';
         
-        // 편집 불가 설정 카드 렌더링
+        // 시스템 상태(읽기 전용) 카드 렌더링
         const readonlyGrid = document.getElementById('readonly-configs-grid');
         readonlyGrid.innerHTML = readonlyConfigs.length > 0
             ? readonlyConfigs.map((config) => renderConfigCard(config, true)).join('')
-            : '<div class="col-12 text-center py-3 text-muted">편집 불가 설정이 없습니다.</div>';
+            : '<div class="col-12 text-center py-3 text-muted">시스템 상태 항목이 없습니다.</div>';
         
         // 카드 툴팁 초기화
         initTooltips(accordionWrapper);
@@ -385,8 +380,8 @@ function editConfig(index) {
     originalValues = JSON.parse(JSON.stringify(config.value));
     isJsonMode = false;
     
-    // 읽기 전용 체크
-    const isReadonly = READONLY_CONFIG_KEYS.includes(config.key);
+    // 정책 설정만 편집 가능, 나머지는 읽기 전용
+    const isReadonly = !EDITABLE_CONFIG_KEYS.includes(config.key);
     
     // 모달 헤더 설정
     document.getElementById('configModalTitle').textContent = isReadonly
@@ -747,7 +742,7 @@ function toggleJsonMode() {
         try {
             const jsonValue = JSON.parse(document.getElementById('config-value-json').value);
             const configKey = document.getElementById('config-key').value;
-            const isReadonly = READONLY_CONFIG_KEYS.includes(configKey);
+            const isReadonly = !EDITABLE_CONFIG_KEYS.includes(configKey);
             
             renderKvFields(configKey, jsonValue, isReadonly);
             

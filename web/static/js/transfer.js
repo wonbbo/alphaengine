@@ -503,12 +503,16 @@ async function loadTransferProgress(transferId) {
             renderDetailContent(data);
         }
         
-        // 완료/실패 시 폴링 중지 및 알림 표시
+        // 완료/실패 시 폴링 중지, 진행 ID 초기화, 목록·입금·출금 카드 즉시 갱신
         if (['COMPLETED', 'FAILED', 'CANCELLED'].includes(data.status)) {
             stopPolling();
-            loadDepositStatus();
-            loadWithdrawStatus();
-            loadHistory();
+            currentTransferId = null;
+            // 목록 카드·입금 카드·출금 카드 즉시 갱신 (await로 완료 보장)
+            await Promise.all([
+                loadDepositStatus(),
+                loadWithdrawStatus(),
+                loadHistory(),
+            ]);
             
             // Toast 알림 표시
             const typeText = data.transfer_type === 'DEPOSIT' ? '입금' : '출금';
@@ -523,9 +527,12 @@ async function loadTransferProgress(transferId) {
                 showToast(`${typeText}이 취소되었습니다.`, 'warning');
             }
             
-            // 진행 상태 섹션 3초 후 숨김
+            // 진행 상태 섹션 3초 후 숨기고, 카드·목록 한 번 더 갱신 (서버 반영 지연 대비)
             setTimeout(() => {
                 if (section) section.style.display = 'none';
+                loadDepositStatus();
+                loadWithdrawStatus();
+                loadHistory();
             }, 3000);
         }
         
@@ -732,10 +739,9 @@ async function cancelTransfer() {
         
         alert('이체가 취소되었습니다.');
         stopPolling();
-        loadDepositStatus();
-        loadWithdrawStatus();
-        loadHistory();
+        currentTransferId = null;
         document.getElementById('progress-section').style.display = 'none';
+        await Promise.all([loadDepositStatus(), loadWithdrawStatus(), loadHistory()]);
         
     } catch (error) {
         alert('취소 실패: ' + error.message);

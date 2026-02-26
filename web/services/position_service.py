@@ -42,8 +42,9 @@ class PositionService:
         Returns:
             positions, total_count, limit, offset 포함 응답
         """
-        conditions = ["scope_mode = ?"]
-        params: list[Any] = [mode]
+        # 포지션 히스토리는 선물(FUTURES)만 조회
+        conditions = ["scope_mode = ?", "scope_venue = ?"]
+        params: list[Any] = [mode, "FUTURES"]
         
         if status:
             conditions.append("status = ?")
@@ -95,9 +96,9 @@ class PositionService:
                 "cumulative_pnl": str(cumulative_pnl),
             })
         
-        # 총 개수 (페이지네이션용)
-        count_conditions = ["scope_mode = ?"]
-        count_params: list[Any] = [mode]
+        # 총 개수 (페이지네이션용, 선물만)
+        count_conditions = ["scope_mode = ?", "scope_venue = ?"]
+        count_params: list[Any] = [mode, "FUTURES"]
         if status:
             count_conditions.append("status = ?")
             count_params.append(status)
@@ -249,12 +250,13 @@ class PositionService:
         Returns:
             청산된 포지션 목록 (오래된 것부터)
         """
+        # 청산된 포지션도 선물만 조회
         sql = """
             SELECT 
                 session_id, symbol, side, 
                 closed_at, realized_pnl
             FROM position_session
-            WHERE scope_mode = ? AND status = 'CLOSED'
+            WHERE scope_mode = ? AND scope_venue = 'FUTURES' AND status = 'CLOSED'
             ORDER BY closed_at DESC
             LIMIT ?
         """

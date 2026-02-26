@@ -24,16 +24,19 @@ class TransactionService:
         self,
         mode: str,
         symbol: str | None = None,
+        venue: str | None = "FUTURES",
         limit: int = 100,
         offset: int = 0,
     ) -> dict[str, Any]:
         """거래 목록 조회
         
         v_trade_summary View 활용.
+        venue 기본값 FUTURES(선물만). None이면 모두.
         
         Args:
             mode: TESTNET 또는 PRODUCTION
             symbol: 심볼 필터 (선택)
+            venue: FUTURES / SPOT (선택, None이면 모두, 기본 FUTURES)
             limit: 조회 개수 제한
             offset: 시작 위치
             
@@ -43,13 +46,17 @@ class TransactionService:
         trades = await self.ledger_store.get_trade_summary(
             scope_mode=mode,
             symbol=symbol,
+            scope_venue=venue,
             limit=limit,
             offset=offset,
         )
         
-        # 총 개수 조회
+        # 총 개수 조회 (동일한 venue 조건)
         count_sql = "SELECT COUNT(*) FROM v_trade_summary WHERE scope_mode = ?"
         params: list[Any] = [mode]
+        if venue:
+            count_sql += " AND scope_venue = ?"
+            params.append(venue)
         if symbol:
             count_sql += " AND symbol = ?"
             params.append(symbol)

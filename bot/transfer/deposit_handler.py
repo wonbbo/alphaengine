@@ -29,6 +29,9 @@ from core.types import Scope, TransferStatus
 
 logger = logging.getLogger(__name__)
 
+# 입금 진행 중 Step 2→3 구간에서만 사용하는 임시 설정 키. 사용 후 삭제.
+DEPOSIT_TEMP_CONFIG_KEY_PREFIX = "deposit:step2_trx:"
+
 
 class DepositHandler:
     """입금 핸들러
@@ -134,7 +137,23 @@ class DepositHandler:
                 TransferStatus.FAILED,
                 error_message=error_msg,
             )
+            await self._clear_deposit_temp_config(transfer.transfer_id)
             return await self.repository.get(transfer.transfer_id)  # type: ignore
+    
+    async def _clear_deposit_temp_config(self, transfer_id: str) -> None:
+        """입금 임시 설정 키 삭제 (완료/실패/취소 시 호출)"""
+        if not self.db:
+            return
+        try:
+            config_store = ConfigStore(self.db)
+            key = f"{DEPOSIT_TEMP_CONFIG_KEY_PREFIX}{transfer_id}"
+            await config_store.delete(key)
+        except Exception as e:
+            logger.debug(f"Deposit temp config cleanup skipped: {e}")
+    
+    async def clear_temp_config(self, transfer_id: str) -> None:
+        """입금 임시 설정 키 삭제 (Manager 취소 등 외부에서 호출)"""
+        await self._clear_deposit_temp_config(transfer_id)
     
     async def _step1_buy_trx(self, transfer: Transfer) -> Transfer:
         """Step 1: Upbit에서 TRX 매수 (필요 시)
@@ -411,7 +430,7 @@ class DepositHandler:
                                 try:
                                     config_store = ConfigStore(self.db)
                                     await config_store.set(
-                                        f"deposit:step2_trx:{transfer.transfer_id}",
+                                        f"{DEPOSIT_TEMP_CONFIG_KEY_PREFIX}{transfer.transfer_id}",
                                         {"amount": str(withdraw_amount)},
                                         updated_by="bot:deposit",
                                     )
@@ -453,7 +472,7 @@ class DepositHandler:
                                 try:
                                     config_store = ConfigStore(self.db)
                                     await config_store.set(
-                                        f"deposit:step2_trx:{transfer.transfer_id}",
+                                        f"{DEPOSIT_TEMP_CONFIG_KEY_PREFIX}{transfer.transfer_id}",
                                         {"amount": str(withdraw_amount)},
                                         updated_by="bot:deposit",
                                     )
@@ -487,7 +506,7 @@ class DepositHandler:
                     try:
                         config_store = ConfigStore(self.db)
                         await config_store.set(
-                            f"deposit:step2_trx:{transfer.transfer_id}",
+                            f"{DEPOSIT_TEMP_CONFIG_KEY_PREFIX}{transfer.transfer_id}",
                             {"amount": str(withdraw_amount)},
                             updated_by="bot:deposit",
                         )
@@ -542,7 +561,7 @@ class DepositHandler:
         if self.db:
             try:
                 config_store = ConfigStore(self.db)
-                step2_data = await config_store.get(f"deposit:step2_trx:{transfer.transfer_id}")
+                step2_data = await config_store.get(f"{DEPOSIT_TEMP_CONFIG_KEY_PREFIX}{transfer.transfer_id}")
                 if step2_data and isinstance(step2_data.get("amount"), (str, int, float)):
                     expected = float(step2_data["amount"])
                     if expected > 0:
@@ -800,6 +819,7 @@ class DepositHandler:
             TransferStatus.COMPLETED,
             current_step=6,
         )
+        await self._clear_deposit_temp_config(transfer.transfer_id)
         
         updated = await self.repository.get(transfer.transfer_id)
         logger.info(

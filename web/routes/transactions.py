@@ -47,13 +47,16 @@ async def transactions_page(
 @router.get("/api/transactions")
 async def get_transactions(
     symbol: str | None = Query(default=None),
+    venue: str | None = Query(default="FUTURES", description="FUTURES(선물) / SPOT(현물) / ALL(모두)"),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     db: SQLiteAdapter = Depends(get_db),
     settings: Settings = Depends(get_app_settings),
 ):
-    """거래 내역 목록 조회"""
+    """거래 내역 목록 조회. venue 기본값 선물만."""
     service = TransactionService(db)
     mode = settings.mode.value.upper()
+    # ALL이면 None으로 넘겨서 필터 없이 조회
+    venue_param = None if venue and venue.upper() == "ALL" else (venue or "FUTURES")
     
-    return await service.get_transactions(mode, symbol, limit, offset)
+    return await service.get_transactions(mode, symbol, venue_param, limit, offset)

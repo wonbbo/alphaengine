@@ -25,7 +25,7 @@ async def get_trade_summary(
     """거래 요약 조회 (v_trade_summary)"""
     store = LedgerStore(db)
     mode = settings.mode.value.upper()
-    return await store.get_trade_summary(mode, symbol, limit, offset)
+    return await store.get_trade_summary(mode, symbol, None, limit, offset)
 
 
 @router.get("/daily-pnl")

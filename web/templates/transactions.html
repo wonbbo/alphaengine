@@ -4,8 +4,13 @@
 
 {% block content %}
 <div class="row mb-3 mb-md-4">
-    <div class="col-12">
+    <div class="col-12 d-flex flex-column flex-sm-row justify-content-between align-items-start align-items-sm-center gap-2">
         <h2 class="mb-0"><i class="bi bi-list-ul"></i> 거래 내역</h2>
+        <div class="btn-group w-100 w-sm-auto" role="group" style="max-width: 280px;">
+            <button type="button" class="btn btn-outline-primary btn-sm active" id="filter-venue-futures" data-venue="FUTURES">선물</button>
+            <button type="button" class="btn btn-outline-secondary btn-sm" id="filter-venue-spot" data-venue="SPOT">현물</button>
+            <button type="button" class="btn btn-outline-secondary btn-sm" id="filter-venue-all" data-venue="ALL">모두</button>
+        </div>
     </div>
 </div>
 
@@ -16,9 +21,9 @@
                 <thead>
                     <tr>
                         <th>코인</th>
+                        <th>선물/현물</th>
                         <th>시간</th>
-                        <th class="text-end">매수</th>
-                        <th class="text-end">매도</th>
+                        <th class="text-end">거래</th>
                         <th class="text-end d-none d-sm-table-cell">수수료</th>
                         <th class="text-end">수익</th>
                     </tr>

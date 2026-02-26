@@ -198,6 +198,12 @@ async def _create_ledger_views(db: "SQLiteAdapter") -> None:
             je.entry_id,
             je.ts,
             je.scope_mode,
+            -- journal_line의 ASSET 계정에서 선물/현물 구분 (FUTURES / SPOT)
+            MAX(CASE 
+                WHEN jl.account_id LIKE 'ASSET:BINANCE_FUTURES:%' THEN 'FUTURES' 
+                WHEN jl.account_id LIKE 'ASSET:BINANCE_SPOT:%' THEN 'SPOT' 
+                ELSE NULL 
+            END) as scope_venue,
             je.symbol,
             je.transaction_type,
             je.description,

@@ -585,6 +585,7 @@ class LedgerStore:
         self,
         scope_mode: str,
         symbol: str | None = None,
+        scope_venue: str | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> list[dict[str, Any]]:
@@ -595,15 +596,16 @@ class LedgerStore:
         Args:
             scope_mode: TESTNET 또는 PRODUCTION
             symbol: 필터링할 심볼 (선택)
+            scope_venue: FUTURES / SPOT (선택, None이면 모두)
             limit: 조회 개수 제한
             offset: 시작 위치
             
         Returns:
-            거래 요약 목록
+            거래 요약 목록 (scope_venue 포함)
         """
         sql = """
             SELECT 
-                entry_id, ts, scope_mode, symbol, transaction_type,
+                entry_id, ts, scope_mode, scope_venue, symbol, transaction_type,
                 description, related_trade_id, related_order_id,
                 bought_qty, sold_qty, usdt_spent, usdt_received,
                 fee_usdt, realized_pnl
@@ -611,6 +613,10 @@ class LedgerStore:
             WHERE scope_mode = ?
         """
         params: list[Any] = [scope_mode]
+        
+        if scope_venue:
+            sql += " AND scope_venue = ?"
+            params.append(scope_venue)
         
         if symbol:
             sql += " AND symbol = ?"
@@ -626,17 +632,18 @@ class LedgerStore:
                 "entry_id": row[0],
                 "ts": row[1],
                 "scope_mode": row[2],
-                "symbol": row[3],
-                "transaction_type": row[4],
-                "description": row[5],
-                "related_trade_id": row[6],
-                "related_order_id": row[7],
-                "bought_qty": row[8],
-                "sold_qty": row[9],
-                "usdt_spent": row[10],
-                "usdt_received": row[11],
-                "fee_usdt": row[12],
-                "realized_pnl": row[13],
+                "scope_venue": row[3],
+                "symbol": row[4],
+                "transaction_type": row[5],
+                "description": row[6],
+                "related_trade_id": row[7],
+                "related_order_id": row[8],
+                "bought_qty": row[9],
+                "sold_qty": row[10],
+                "usdt_spent": row[11],
+                "usdt_received": row[12],
+                "fee_usdt": row[13],
+                "realized_pnl": row[14],
             }
             for row in rows
         ]
